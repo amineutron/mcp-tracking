@@ -25,19 +25,43 @@ les sessions depuis le media-server (qBittorrent, Bazarr, conversion DV).
 
 ```
 MCP/tracking/
-  server.py              -- Serveur MCP + simulations de test
-  ui.py                  -- Dashboard Textual (TUI temps reel) + modales stop/kill
-  models.py              -- Modeles de donnees (TrackingSession, TrackingItem, LogEntry)
-  storage.py             -- Stockage en memoire + persistence JSON atomique
-  templates.py           -- Definition des templates disponibles
+  server.py              -- Serveur MCP (outils Claude/Lyra) + point d'entree --ui / --test
   api.py                 -- API HTTP locale (127.0.0.1:8765) pour les scripts externes
+  mutations.py           -- Mutations d'une session, partagees par api.py ET server.py
+                            (horodatage items, historique, niveaux de log, auto-completion)
+  metrics.py             -- Metriques derivees (vitesse, ETA, ecoule, stale) -- logique pure,
+                            calculees a la lecture, jamais stockees
+  storage.py             -- Persistence JSON atomique + verrou fichier + cache mtime + purge TTL
+  models.py              -- Modeles pydantic (TrackingSession, TrackingItem, LogEntry, ProgressPoint)
+  templates.py           -- Templates builtin + templates utilisateur (JSON)
+  ui.py                  -- Dashboard Textual (TUI temps reel) + modales stop/kill
+  sim.py                 -- Simulations de demo (server.py --test)
   poller.py              -- Daemon polling qBittorrent (10s) + Bazarr (60s)
-  tracking-api.service   -- Service systemd pour api.py
-  tracking-poller.service -- Service systemd pour poller.py
-  pyproject.toml         -- Dependances Python
-  tracking_state.json    -- Etat courant (cree automatiquement)
-  poller_state.json      -- Etat interne du poller (cree automatiquement)
+  tracking-api.service   -- Unite systemd (systeme) pour api.py
+  tracking-poller.service -- Unite systemd (systeme) pour poller.py
+  install.sh / deploy.sh -- Installation initiale / redeploiement des services
+  Makefile               -- make test | smoke | deploy | ui
+  tests/                 -- unitaires (storage, metrics) + integration/ (API HTTP reelle)
 ```
+
+### Fichiers d'etat et configuration
+
+| Fichier | Emplacement | Surcharge |
+|---------|-------------|-----------|
+| `tracking_state.json` | `~/.local/state/tracking/` | `TRACKING_STATE_DIR` |
+| `poller_state.json`   | `~/.local/state/tracking/` | `TRACKING_STATE_DIR` |
+| `templates.json` (templates utilisateur, optionnel) | `~/.config/tracking/` | `TRACKING_TEMPLATES_FILE` |
+| `credentials/*.cred` (qBittorrent, Bazarr) | a cote du code, gitignore | -- |
+
+Un ancien `tracking_state.json` a cote du code est migre automatiquement au premier
+demarrage (copie, jamais supprime).
+
+Variables d'environnement de retention :
+
+| Variable | Defaut | Role |
+|----------|--------|------|
+| `TRACKING_TTL_DAYS` | 7 | Purge des sessions done / error / paused |
+| `TRACKING_TTL_RUNNING_H` | 24 | Purge des sessions running orphelines (plus mises a jour) |
 
 ### Flux de donnees complet
 
@@ -49,7 +73,7 @@ Claude/Lyra (outils MCP)
                                                       |
 qBittorrent API (poll 10s)                            |
       |                                               |
-Bazarr API (poll 60s)    ──> poller.py ──> api.py ──> storage.py ──> tracking_state.json
+Bazarr API (poll 60s)    ──> poller.py ──> api.py ──> mutations.py ──> storage.py ──> ~/.local/state/tracking/tracking_state.json
       |                                               |                        |
 dv_webhook_server.py                                  |                        v
       |                                               |                     ui.py
@@ -58,8 +82,26 @@ dv_convert.py ──────────────────────
    (metriques temps reel ffmpeg/dovi_tool)
 ```
 
-Le fichier `tracking_state.json` est ecrit a chaque modification via ecriture atomique (`os.replace`).
-Tous les processus (MCP, poller, dashboard) partagent cet unique fichier.
+Le fichier d'etat est ecrit a chaque modification via ecriture atomique (`os.replace`) sous verrou
+fichier (`tracking_state.lock`). Tous les processus (MCP, API, poller, dashboard) partagent cet
+unique fichier ; chaque lecture verifie le mtime pour invalider son cache.
+
+Toute mutation (HTTP ou MCP) passe par `mutations.py`, qui garantit le meme comportement sur les
+deux chemins : `started_at` / `finished_at` poses sur les items et la session, historique de
+progression (fenetre glissante de 40 points), niveaux de log `info` / `warn` / `error`,
+auto-completion quand tous les items sont termines.
+
+### Metriques derivees
+
+`GET /sessions` et `tracking_get` renvoient un bloc `metrics` calcule a la volee par `metrics.py` :
+
+| Champ | Sens |
+|-------|------|
+| `percent` | progression (plafonnee a 100) |
+| `rate`, `rate_str` | vitesse sur les 120 dernieres secondes (`2.0 MB/s`, `30.0 u/min`) |
+| `eta_seconds`, `eta_str` | temps restant estime (session running uniquement) |
+| `elapsed_seconds`, `elapsed_str` | depuis `created_at` jusqu'a `finished_at` ou maintenant |
+| `idle_seconds`, `stale` | `stale` = running sans mise a jour depuis 10 min (affiche dans le TUI) |
 
 ---
 
@@ -98,12 +140,17 @@ Deux services tournent en permanence et se lancent au boot :
 | `tracking-api.service` | API HTTP locale pour scripts externes | 127.0.0.1:8765 |
 | `tracking-poller.service` | Poll qBittorrent (10s) + Bazarr (60s) | -- |
 
-### Installation initiale
+### Installation initiale et redeploiement
 
 ```bash
 cd /home/amineutron/dev/MCP/tracking
-./install.sh
+./install.sh        # premiere fois : venv + services (demande sudo)
+sudo ./deploy.sh    # apres chaque mise a jour du code : stop, unites, restart, verif
+make smoke          # sante rapide
 ```
+
+Les instances MCP `server.py` deja ouvertes par des sessions Claude Code ne sont pas
+redemarrees par `deploy.sh` : reconnecter `tracking` via `/mcp` dans ces sessions.
 
 ### Commandes utiles
 
@@ -245,16 +292,16 @@ Le poller interroge `http://localhost:8080/api/v2/torrents/info` toutes les 10 s
 
 - Un torrent actif = une session `[DOWNLOAD]` avec nom, taille, vitesse, ETA
 - La session est supprimee automatiquement quand le torrent termine ou disparait
-- Credentials : `admin / adminadmin`
+- Credentials : `credentials/qbt-password.cred` (chiffre `systemd-creds --user`, genere par `media-server/scripts/secrets/rotate-secrets.sh`)
 
 ### Bazarr sous-titres manquants (automatique)
 
 Le poller interroge l'API Bazarr toutes les 60 secondes.
 
-- Une session `[FREE]` unique liste tous les episodes/films sans sous-titres FR
+- Une session `[SUBTITLES]` unique liste tous les episodes/films sans sous-titres FR
 - Le titre de la session indique le total : `Sous-titres manquants (151)`
 - Les 50 premiers fichiers manquants sont listes comme items
-- API key Bazarr : dans `/home/amineutron/dev/media-server/data/config/bazarr/config/config.ini`
+- API key Bazarr : `credentials/bazarr-api-key.cred` (meme mecanisme). Sans credential, le poll concerne est simplement desactive.
 
 ### Conversion Dolby Vision (automatique)
 
@@ -359,7 +406,8 @@ curl http://127.0.0.1:8765/sessions
 ```
 Parametres:
   name      (str)          Nom de la session
-  template  (str)          "download" | "machine" | "free" | "movie" | "lyra_task"
+  template  (str)          "download" | "machine" | "free" | "movie" | "lyra_task" |
+                           "subtitles" | "series_episode" | "series_season" | template utilisateur
   total     (float)        Valeur totale
   unit      (str, opt)     Unite affichee (ex: " MB", " machines", "%")
   items     (list, opt)    Liste d'elements a suivre
@@ -530,7 +578,7 @@ Les 6 etapes DV trackees avec metriques temps reel :
 - n8n restreint a `127.0.0.1:5678` dans `docker-compose.yml`
 - `dv_webhook_server.py` ecoute sur `0.0.0.0:8787` (necessaire pour recevoir les webhooks Docker) -- proteger ce port avec un firewall si la machine est exposee
 - Les services systemd tournent avec `NoNewPrivileges=true`
-- Les API keys Radarr/Sonarr/Bazarr sont dans `media-server/.env` et `dv_convert.py`
+- Aucun secret en clair dans le code : `poller.py` lit `$CREDENTIALS_DIRECTORY` (service user) ou dechiffre `credentials/*.cred` via `systemd-creds decrypt --user` (service systeme), avec repli sur les variables `QBT_PASSWORD` / `BAZARR_KEY` pour le debug
 
 ---
 
@@ -547,6 +595,20 @@ Les 6 etapes DV trackees avec metriques temps reel :
 },
 ```
 
-2. Optionnel : ajouter une simulation `_sim_mon_template()` dans `server.py`.
+2. Optionnel : ajouter une simulation `_sim_mon_template()` dans `sim.py`.
 
 Le template est immediatement disponible sans autre modification.
+
+Sans toucher au code, un template peut aussi etre declare dans `~/.config/tracking/templates.json`
+(meme structure, cle = nom du template) ; il est charge au demarrage.
+
+---
+
+## Tests
+
+```bash
+make test     # unitaires (storage, metrics) + integration (API HTTP reelle sur port ephemere)
+```
+
+La fixture autouse de `conftest.py` redirige la persistence vers un `tmp_path` : les tests ne
+touchent jamais l'etat de production.
