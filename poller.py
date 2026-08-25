@@ -76,7 +76,8 @@ def _secret(cred_name: str, env_var: str) -> str | None:
 QBT_PASSWORD   = _secret("qbt-password", "QBT_PASSWORD")
 BAZARR_KEY     = _secret("bazarr-api-key", "BAZARR_KEY")
 
-STATE_FILE = Path(__file__).parent / "poller_state.json"
+sys.path.insert(0, str(Path(__file__).parent))
+from storage import POLLER_STATE_FILE as STATE_FILE  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers HTTP
@@ -105,6 +106,40 @@ def _api(method: str, path: str, body: dict = None) -> dict | None:
     except Exception as e:
         print(f"{method} {path} -> {e}", flush=True)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Backoff : quand une cible est injoignable, on espace les tentatives
+# (10s -> 20s -> 40s ... cap 5 min) et on ne logue qu'au changement d'etat.
+# ---------------------------------------------------------------------------
+
+BACKOFF_MAX_S = 300
+
+
+class Backoff:
+    def __init__(self, name: str, base_s: float):
+        self.name = name
+        self.base = base_s
+        self.delay = base_s
+        self.next_at = 0.0
+        self.down = False
+
+    def ready(self, now: float) -> bool:
+        return now >= self.next_at
+
+    def ok(self, now: float) -> None:
+        if self.down:
+            print(f"{self.name}: de nouveau joignable", flush=True)
+        self.down = False
+        self.delay = self.base
+        self.next_at = now + self.base
+
+    def fail(self, now: float, reason: str = "") -> None:
+        if not self.down:
+            print(f"{self.name}: injoignable ({reason}) -- backoff active", flush=True)
+        self.down = True
+        self.delay = min(self.delay * 2, BACKOFF_MAX_S)
+        self.next_at = now + self.delay
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +291,11 @@ QBT_ACTIVE_STATES = {
 class QbtPoller:
     def __init__(self):
         self._sid: str = ""
+        self.quiet = False  # True pendant un backoff : pas de spam de logs
+
+    def _log(self, msg: str) -> None:
+        if not self.quiet:
+            print(msg, flush=True)
 
     def _login(self) -> bool:
         # Relire le mot de passe a chaque login : apres une rotation mensuelle,
@@ -263,8 +303,7 @@ class QbtPoller:
         # (au prochain login declenche par l'expiration de session / 403).
         pw = _secret("qbt-password", "QBT_PASSWORD")
         if not pw:
-            print("qbt login -> mot de passe absent (credential systemd manquant)",
-                  flush=True)
+            self._log("qbt login -> mot de passe absent (credential systemd manquant)")
             return False
         data = urllib.parse.urlencode({"username": QBT_USER, "password": pw}).encode()
         # qBittorrent exige le header Referer et pose un cookie QBT_SID_<port>.
@@ -284,7 +323,7 @@ class QbtPoller:
                             self._sid = p
                             return True
         except Exception as e:
-            print(f"qbt login -> {e}", flush=True)
+            self._log(f"qbt login -> {e}")
         return False
 
     def _get_torrent_files(self, hash: str) -> list:
@@ -313,20 +352,21 @@ class QbtPoller:
                 self._sid = ""  # Session expiree
             return None
         except Exception as e:
-            print(f"qbt torrents -> {e}", flush=True)
+            self._log(f"qbt torrents -> {e}")
             return None
 
-    def poll(self, state: dict) -> None:
+    def poll(self, state: dict) -> bool:
+        """Retourne False si qBittorrent est injoignable (declenche le backoff)."""
         if not self._sid and not self._login():
-            return
+            return False
 
         torrents = self._get_torrents()
         if torrents is None:
             # Retry login
             if self._login():
-                torrents = self._get_torrents() or []
-            else:
-                return
+                torrents = self._get_torrents()
+            if torrents is None:
+                return False
 
         qbt_state = state.setdefault("qbt", {})
 
@@ -355,6 +395,9 @@ class QbtPoller:
 
             template = _detect_template(name, category)
             media    = _parse_media_info(name) if template != "download" else {}
+
+            qstate    = t.get("state", "")
+            status    = "paused" if qstate == "pausedDL" else "running"
 
             extra: dict = {"speed": speed_str, "eta": eta_str, "phase": "download"}
             extra["seeds"] = str(seeds)
@@ -408,8 +451,9 @@ class QbtPoller:
                     "processed": done_mb,
                     "total":     total_mb,
                     "extra":     extra,
-                    "status":    "running",
+                    "status":    status,
                 })
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -418,7 +462,10 @@ class QbtPoller:
 
 class BazarrPoller:
 
-    def _fetch_wanted(self, endpoint: str) -> list:
+    quiet = False
+
+    def _fetch_wanted(self, endpoint: str) -> list | None:
+        """None = Bazarr injoignable (distinct d'une liste vide)."""
         url = f"{BAZARR_HOST}/api/{endpoint}?start=0&length=500"
         req = urllib.request.Request(url)
         req.add_header("X-API-KEY", BAZARR_KEY)
@@ -427,14 +474,20 @@ class BazarrPoller:
                 data = json.loads(r.read().decode())
                 return data.get("data", [])
         except Exception as e:
-            print(f"bazarr {endpoint} -> {e}", flush=True)
-            return []
+            if not self.quiet:
+                print(f"bazarr {endpoint} -> {e}", flush=True)
+            return None
 
-    def poll(self, state: dict) -> None:
+    def poll(self, state: dict) -> bool:
+        """Retourne False si Bazarr est injoignable (declenche le backoff)."""
         if not BAZARR_KEY:
-            return  # cle API absente (credential systemd manquant) -> poll desactive
+            return True  # cle API absente (credential systemd manquant) -> poll desactive
         episodes = self._fetch_wanted("episodes/wanted")
-        movies   = self._fetch_wanted("movies/wanted")
+        if episodes is None:
+            return False
+        movies = self._fetch_wanted("movies/wanted")
+        if movies is None:
+            return False
 
         items_ep = [
             {
@@ -476,7 +529,7 @@ class BazarrPoller:
                 state["bazarr_initial_total"] = 0
                 state["bazarr_total"]         = -1
                 print("bazarr: tous les sous-titres sont presents", flush=True)
-            return
+            return True
 
         if not bsid:
             # Nouvelle session : le total actuel devient la reference
@@ -497,7 +550,7 @@ class BazarrPoller:
                 state["bazarr_initial_total"] = total
                 state["bazarr_total"]         = total
                 print(f"bazarr: session creee ({total} manquants)", flush=True)
-            return
+            return True
 
         # Session existante -- mettre a jour la progression
         if total > initial_total:
@@ -509,14 +562,17 @@ class BazarrPoller:
         state["bazarr_total"] = total
 
         _api("PUT", f"/sessions/{bsid}", {
-            "processed": float(found),
-            "total":     float(initial_total),
+            "name":          f"Sous-titres manquants ({total})",
+            "processed":     float(found),
+            "total":         float(initial_total),
+            "replace_items": all_items[:20],   # liste courante, pas celle du premier poll
             "extra": {
                 "source":           "Bazarr",
                 "missing_episodes": str(len(items_ep)),
                 "missing_movies":   str(len(items_mv)),
             },
         })
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -541,29 +597,39 @@ def main() -> None:
     qbt     = QbtPoller()
     bazarr  = BazarrPoller()
 
-    tick_qbt    = 0
-    tick_bazarr = 0
+    bo_qbt    = Backoff("qbt", QBT_POLL_SECS)
+    bo_bazarr = Backoff("bazarr", BAZARR_POLL_SECS)
 
     while True:
         now = time.time()
 
-        if now - tick_qbt >= QBT_POLL_SECS:
+        if bo_qbt.ready(now):
+            qbt.quiet = bo_qbt.down
             try:
-                qbt.poll(state)
+                ok = qbt.poll(state)
             except Exception as e:
                 print(f"qbt poll erreur: {e}", flush=True)
-            tick_qbt = now
+                ok = False
+            if ok:
+                bo_qbt.ok(time.time())
+            else:
+                bo_qbt.fail(time.time(), "timeout/refus")
             _save_state(state)
 
-        if now - tick_bazarr >= BAZARR_POLL_SECS:
+        if bo_bazarr.ready(now):
+            bazarr.quiet = bo_bazarr.down
             try:
-                bazarr.poll(state)
+                ok = bazarr.poll(state)
             except Exception as e:
                 print(f"bazarr poll erreur: {e}", flush=True)
-            tick_bazarr = now
+                ok = False
+            if ok:
+                bo_bazarr.ok(time.time())
+            else:
+                bo_bazarr.fail(time.time(), "timeout/refus")
             _save_state(state)
 
-        time.sleep(2)
+        time.sleep(1)
 
 
 if __name__ == "__main__":

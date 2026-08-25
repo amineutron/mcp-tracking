@@ -3,7 +3,7 @@ le vrai storage (redirige vers tmp_path par la fixture autouse de conftest).
 Pas de mock : on teste le comportement que dv_convert.py et le poller voient.
 """
 import threading
-from http.server import HTTPServer
+from http.server import ThreadingHTTPServer
 
 import pytest
 import requests
@@ -14,7 +14,8 @@ import api
 @pytest.fixture
 def base_url():
     """Demarre l'API reelle sur un port libre, l'arrete a la fin du test."""
-    server = HTTPServer(("127.0.0.1", 0), api.Handler)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), api.Handler)
+    server.daemon_threads = True
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     yield f"http://127.0.0.1:{server.server_address[1]}"

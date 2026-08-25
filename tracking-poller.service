@@ -14,11 +14,11 @@ StandardOutput=journal
 StandardError=journal
 Environment=PYTHONUNBUFFERED=1
 
-# Secrets injectes depuis Vaultwarden via systemd-creds (chiffres au repos).
-# Generes/rafraichis par media-server/scripts/secrets/rotate-secrets.sh.
-# Deviennent lisibles dans $CREDENTIALS_DIRECTORY/{qbt-password,bazarr-api-key}.
-LoadCredentialEncrypted=qbt-password:/home/amineutron/dev/MCP/tracking/credentials/qbt-password.cred
-LoadCredentialEncrypted=bazarr-api-key:/home/amineutron/dev/MCP/tracking/credentials/bazarr-api-key.cred
+# Secrets : blobs credentials/*.cred chiffres en mode --user par
+# media-server/scripts/secrets/rotate-secrets.sh. Ce service systeme tourne en
+# tant qu'amineutron : poller.py les dechiffre lui-meme via
+# `systemd-creds decrypt --user` (LoadCredentialEncrypted ne s'applique qu'aux
+# credentials chiffres avec la cle systeme).
 
 NoNewPrivileges=true
 
