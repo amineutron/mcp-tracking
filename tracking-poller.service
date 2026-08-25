@@ -1,0 +1,26 @@
+[Unit]
+Description=MCP Tracking Poller (qBittorrent + Bazarr)
+After=network.target tracking-api.service
+Requires=tracking-api.service
+
+[Service]
+Type=simple
+User=amineutron
+WorkingDirectory=/home/amineutron/dev/MCP/tracking
+ExecStart=/home/amineutron/dev/MCP/tracking/.venv/bin/python /home/amineutron/dev/MCP/tracking/poller.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+
+# Secrets injectes depuis Vaultwarden via systemd-creds (chiffres au repos).
+# Generes/rafraichis par media-server/scripts/secrets/rotate-secrets.sh.
+# Deviennent lisibles dans $CREDENTIALS_DIRECTORY/{qbt-password,bazarr-api-key}.
+LoadCredentialEncrypted=qbt-password:/home/amineutron/dev/MCP/tracking/credentials/qbt-password.cred
+LoadCredentialEncrypted=bazarr-api-key:/home/amineutron/dev/MCP/tracking/credentials/bazarr-api-key.cred
+
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

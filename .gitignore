@@ -1,0 +1,10 @@
+*.cred
+credentials/
+bw-master.cred
+.venv/
+__pycache__/
+.pytest_cache/
+tracking_state.json
+poller_state.json
+*.tmp
+*.lock

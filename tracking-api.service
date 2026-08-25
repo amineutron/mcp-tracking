@@ -1,0 +1,22 @@
+[Unit]
+Description=MCP Tracking API (HTTP local 127.0.0.1:8765)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=amineutron
+WorkingDirectory=/home/amineutron/dev/MCP/tracking
+ExecStart=/home/amineutron/dev/MCP/tracking/.venv/bin/python /home/amineutron/dev/MCP/tracking/api.py
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+
+# Securite : le service ne doit jamais etre accessible en dehors de localhost
+# Il ecoute deja sur 127.0.0.1:8765 mais on restreint aussi au niveau systemd
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

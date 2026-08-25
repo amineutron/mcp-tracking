@@ -1,0 +1,24 @@
+[project]
+name = "mcp-tracking"
+version = "0.1.0"
+description = "Serveur MCP de suivi en temps reel avec barre de progression"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp[cli]>=1.0.0",
+    "pydantic>=2.0",
+    "textual>=0.80.0",
+]
+
+[project.scripts]
+mcp-tracking = "server:main"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.backends.legacy:build"
+
+[tool.setuptools]
+py-modules = ["server", "models", "storage", "templates"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Lancer la suite : .venv/bin/python -m pytest
