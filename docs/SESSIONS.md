@@ -9,5 +9,5 @@
 - Fait : tests/test_metrics.py (65 tests verts au total), Makefile (test/smoke/deploy/ui),
   deploy.sh idempotent, install.sh simplifie, README reecrit pour la nouvelle architecture.
 - Fait : unites systemd basculees en services systeme, verifiees actives ; depot pousse sur
-  GitHub en prive (marouabah/mcp-tracking, remote origin).
+  GitHub en public (marouabah/mcp-tracking, remote origin).
 - Ouvert : rien de bloquant ; CLAUDE.md absent du projet (regles heritees du hub dev/).
