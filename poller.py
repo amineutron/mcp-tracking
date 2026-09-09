@@ -510,7 +510,7 @@ class BazarrPoller:
 
         bsid          = state.get("bazarr_session")
         initial_total = state.get("bazarr_initial_total", 0)
-        prev_total    = state.get("bazarr_total", -1)
+        state.get("bazarr_total", -1)
 
         # Verifier que la session existe toujours, sinon repartir a zero
         if bsid and _api("GET", f"/sessions/{bsid}") is None:

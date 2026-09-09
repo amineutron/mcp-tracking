@@ -429,7 +429,7 @@ class TrackingDashboard(App):
 
     async def _do_refresh_inner(self) -> None:
         sessions = load_from_file()
-        filters = _compute_filters(sessions)
+        _compute_filters(sessions)
 
         ids = {s.id for s in sessions}
         self._collapsed &= ids
