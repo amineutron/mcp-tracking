@@ -1,13 +1,21 @@
 [project]
 name = "mcp-tracking"
 version = "0.1.0"
-description = "Serveur MCP de suivi en temps reel avec barre de progression"
+description = "MCP server, HTTP API and Textual TUI dashboard to track long-running tasks in real time"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "amineutron" }]
 requires-python = ">=3.11"
 dependencies = [
     "mcp[cli]>=1.0.0",
     "pydantic>=2.0",
     "textual>=0.80.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/amineutron/mcp-tracking"
+Repository = "https://github.com/amineutron/mcp-tracking"
+Issues = "https://github.com/amineutron/mcp-tracking/issues"
 
 [project.scripts]
 mcp-tracking = "server:main"

@@ -1,5 +1,7 @@
 # MCP Tracking
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+
 Serveur MCP de suivi en temps reel avec dashboard terminal.
 Permet a Claude/Lyra de tracker n'importe quelle operation longue ET alimente automatiquement
 les sessions depuis le media-server (qBittorrent, Bazarr, conversion DV).
