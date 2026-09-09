@@ -4,15 +4,15 @@ Ecrit dans le meme stockage que l'API HTTP, sous le meme verrou
 inter-process (storage.modify), avec la meme logique (mutations.py).
 """
 import argparse
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
 
 import metrics
 import mutations
 import storage
-from models import TrackingSession, TrackingItem
-from templates import validate_template, list_templates
+from models import TrackingItem, TrackingSession
+from templates import list_templates, validate_template
 
 mcp = FastMCP("tracking")
 
@@ -304,6 +304,7 @@ def main() -> None:
         app = TrackingDashboard(initial_filter=args.filter)
         if args.test:
             import threading
+
             from sim import _run_simulation
             threading.Thread(target=_run_simulation, daemon=True).start()
         app.run()

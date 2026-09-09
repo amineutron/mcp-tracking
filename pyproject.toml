@@ -38,3 +38,10 @@ include = ["*.py", "README.md", "LICENSE", "Makefile", "tests/", "docs/", "*.ser
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Lancer la suite : .venv/bin/python -m pytest
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+# Sélection explicite : les règles par défaut de ruff ont changé en 0.16 ; on garde les règles de base et le tri des imports.
+select = ["E4", "E7", "E9", "F", "I"]

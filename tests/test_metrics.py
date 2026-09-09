@@ -4,8 +4,7 @@ from datetime import datetime, timedelta
 import pytest
 
 import metrics
-from models import (ItemStatus, ProgressPoint, SessionStatus, TrackingItem,
-                    TrackingSession)
+from models import ItemStatus, ProgressPoint, SessionStatus, TrackingItem, TrackingSession
 
 NOW = datetime(2026, 8, 25, 12, 0, 0)
 

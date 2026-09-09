@@ -5,8 +5,7 @@ import threading
 import time
 
 import storage
-from server import tracking_create, tracking_update, tracking_complete
-
+from server import tracking_complete, tracking_create, tracking_update
 
 # ---------------------------------------------------------------------------
 # Simulation de test (tourne dans un thread background)

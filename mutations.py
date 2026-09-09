@@ -10,8 +10,7 @@ import signal
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from models import (ItemStatus, LogEntry, LogLevel, ProgressPoint,
-                    SessionStatus, TrackingItem, TrackingSession)
+from models import ItemStatus, LogEntry, LogLevel, ProgressPoint, SessionStatus, TrackingItem, TrackingSession
 from templates import get_template_info
 
 _TERMINAL_ITEM = {ItemStatus.DONE, ItemStatus.ERROR}

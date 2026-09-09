@@ -10,23 +10,22 @@ calculees par metrics.py et affichees pour toutes les sessions.
 from datetime import datetime
 from typing import List, Optional
 
-from textual.app import App, ComposeResult
-from textual.binding import Binding
-from textual.containers import Center, Vertical, VerticalScroll
-from textual.screen import ModalScreen
-from textual.widgets import Button, Footer, Header, Input, Label, ListView, ListItem, Static
-
 from rich.console import Group
 from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.containers import Center, Vertical, VerticalScroll
+from textual.screen import ModalScreen
+from textual.widgets import Button, Footer, Header, Input, Label, ListItem, ListView, Static
 
 import metrics
 import mutations
 import storage
 from models import LogEntry, TrackingItem, TrackingSession
 from storage import load_from_file
-from templates import TEMPLATES, PHASE_ALIASES, get_display
+from templates import PHASE_ALIASES, TEMPLATES, get_display
 
 BAR_WIDTH = 30
 LOG_LINES = 5
