@@ -10,6 +10,12 @@ les sessions depuis le media-server (qBittorrent, Bazarr, conversion DV).
 
 ---
 
+## Demo
+
+![Dashboard terminal alimente par les simulations du mode test](docs/assets/demo.gif)
+
+Enregistree avec [`docs/demo/record.sh`](docs/demo/record.sh) : `server.py --test` alimente quatre sessions simulees dans un repertoire d'etat temporaire (`TRACKING_STATE_DIR`), puis `server.py --ui` ouvre le dashboard dessus. Les sessions reelles ne sont pas touchees.
+
 ## Sommaire
 
 - [Architecture](#architecture)
