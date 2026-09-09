@@ -7,7 +7,7 @@ license = { text = "MIT" }
 authors = [{ name = "amineutron" }]
 requires-python = ">=3.11"
 dependencies = [
-    "mcp[cli]>=1.5,<2",
+    "mcp[cli]>=1.5,<3",
     "pydantic>=2.0",
     "textual>=0.80.0",
 ]
