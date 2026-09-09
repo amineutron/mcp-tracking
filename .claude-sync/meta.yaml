@@ -1,5 +1,0 @@
-# MCP Tracking -- serveur MCP + API HTTP + dashboard TUI
-# Pas de commits git mais deux services systemd actifs au boot
-# (tracking-api.service + tracking-poller.service) et consomme
-# par tous les projets du homelab via 127.0.0.1:8765.
-force_active: true

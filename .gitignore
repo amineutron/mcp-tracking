@@ -8,3 +8,4 @@ tracking_state.json
 poller_state.json
 *.tmp
 *.lock
+.claude-sync/
