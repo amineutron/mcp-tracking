@@ -1,6 +1,6 @@
 # MCP Tracking
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![tests](https://github.com/amineutron/mcp-tracking/actions/workflows/tests.yml/badge.svg)](https://github.com/amineutron/mcp-tracking/actions/workflows/tests.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 
 Serveur MCP de suivi en temps reel avec dashboard terminal.
 Permet a Claude/Lyra de tracker n'importe quelle operation longue ET alimente automatiquement
@@ -110,7 +110,7 @@ auto-completion quand tous les items sont termines.
 ## Installation
 
 ```bash
-cd /home/amineutron/dev/MCP/tracking
+cd <dossier du dépôt>
 
 # Creer le venv et installer les dependances
 uv venv .venv
@@ -127,8 +127,8 @@ Pour reenregistrer :
 
 ```bash
 claude mcp add tracking -s user -- \
-  /home/amineutron/dev/MCP/tracking/.venv/bin/python \
-  /home/amineutron/dev/MCP/tracking/server.py
+  <dossier du dépôt>/.venv/bin/python \
+  <dossier du dépôt>/server.py
 ```
 
 ---
@@ -145,7 +145,7 @@ Deux services tournent en permanence et se lancent au boot :
 ### Installation initiale et redeploiement
 
 ```bash
-cd /home/amineutron/dev/MCP/tracking
+cd <dossier du dépôt>
 ./install.sh        # premiere fois : venv + services (demande sudo)
 sudo ./deploy.sh    # apres chaque mise a jour du code : stop, unites, restart, verif
 make smoke          # sante rapide
@@ -184,8 +184,8 @@ Cherche "MCP Tracking" dans wofi/launcher. Lance le dashboard dans Kitty.
 
 ```bash
 # Toutes les sessions
-/home/amineutron/dev/MCP/tracking/.venv/bin/python \
-  /home/amineutron/dev/MCP/tracking/server.py --ui
+<dossier du dépôt>/.venv/bin/python \
+  <dossier du dépôt>/server.py --ui
 
 # Filtre direct au lancement
 .venv/bin/python server.py --ui --filter download
@@ -344,10 +344,10 @@ La barre de progression globale avance en continu pendant chaque etape
 
 ```bash
 # Fichier unique
-python /home/amineutron/dev/media-server/scripts/dv_convert.py /chemin/film.mkv
+python <media-server>/scripts/dv_convert.py /chemin/film.mkv
 
 # Scan dossier
-python /home/amineutron/dev/media-server/scripts/dv_convert.py --scan /mnt/media/media/movies
+python <media-server>/scripts/dv_convert.py --scan /mnt/media/media/movies
 ```
 
 En mode manuel, la session tracking est creee automatiquement dans `process_file`.

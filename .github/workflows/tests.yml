@@ -1,0 +1,11 @@
+name: tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  ci:
+    uses: amineutron/.github/.github/workflows/python-ci.yml@main
+    with:
+      python-versions: '["3.11", "3.12"]'
+      test-command: "uv run --frozen python -m pytest -q -p no:cacheprovider"

@@ -7,7 +7,7 @@ license = { text = "MIT" }
 authors = [{ name = "amineutron" }]
 requires-python = ">=3.11"
 dependencies = [
-    "mcp[cli]>=1.0.0",
+    "mcp[cli]>=1.5,<2",
     "pydantic>=2.0",
     "textual>=0.80.0",
 ]
@@ -19,13 +19,21 @@ Issues = "https://github.com/amineutron/mcp-tracking/issues"
 
 [project.scripts]
 mcp-tracking = "server:main"
+mcp-tracking-api = "api:main"
+mcp-tracking-ui = "ui:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "requests>=2.31"]
 
 [build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.backends.legacy:build"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.setuptools]
-py-modules = ["server", "models", "storage", "templates"]
+[tool.hatch.build.targets.wheel]
+only-include = ["server.py", "api.py", "metrics.py", "models.py", "mutations.py", "poller.py", "sim.py", "storage.py", "templates.py", "ui.py"]
+
+[tool.hatch.build.targets.sdist]
+include = ["*.py", "README.md", "LICENSE", "Makefile", "tests/", "docs/", "*.service", "install.sh", "deploy.sh"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

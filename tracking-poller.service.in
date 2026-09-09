@@ -5,9 +5,9 @@ Requires=tracking-api.service
 
 [Service]
 Type=simple
-User=amineutron
-WorkingDirectory=/home/amineutron/dev/MCP/tracking
-ExecStart=/home/amineutron/dev/MCP/tracking/.venv/bin/python /home/amineutron/dev/MCP/tracking/poller.py
+User=@USER@
+WorkingDirectory=@DIR@
+ExecStart=@DIR@/.venv/bin/python @DIR@/poller.py
 Restart=always
 RestartSec=5
 StandardOutput=journal

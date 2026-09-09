@@ -5,9 +5,9 @@ Wants=network.target
 
 [Service]
 Type=simple
-User=amineutron
-WorkingDirectory=/home/amineutron/dev/MCP/tracking
-ExecStart=/home/amineutron/dev/MCP/tracking/.venv/bin/python /home/amineutron/dev/MCP/tracking/api.py
+User=@USER@
+WorkingDirectory=@DIR@
+ExecStart=@DIR@/.venv/bin/python @DIR@/api.py
 Restart=always
 RestartSec=3
 StandardOutput=journal

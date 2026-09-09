@@ -17,7 +17,10 @@ for f in tracking_state.json poller_state.json; do
     fi
 done
 
-cp "$DIR/tracking-api.service" "$DIR/tracking-poller.service" /etc/systemd/system/
+# Unites rendues depuis les modeles *.service.in : chemin du depot et utilisateur courant
+for u in tracking-api tracking-poller; do
+    sed -e "s#@DIR@#$DIR#g" -e "s#@USER@#$OWNER#g" "$DIR/$u.service.in" > "/etc/systemd/system/$u.service"
+done
 systemctl daemon-reload
 systemctl enable --now tracking-api.service tracking-poller.service
 sleep 2
