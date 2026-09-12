@@ -6,7 +6,7 @@ inter-process (storage.modify), avec la meme logique (mutations.py).
 import argparse
 from typing import Any, Dict, List, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 import metrics
 import mutations
@@ -14,7 +14,7 @@ import storage
 from models import TrackingItem, TrackingSession
 from templates import list_templates, validate_template
 
-mcp = FastMCP("tracking")
+mcp = MCPServer("tracking")
 
 BAR_WIDTH = 22
 ITEM_ICONS = {"pending": "[ ]", "running": "[>]", "done": "[ok]", "error": "[!]"}
