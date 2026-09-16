@@ -6,8 +6,10 @@ auto-completion, upsert d'items.
 Chaque fonction mute la session recue (appelee sous storage.modify()).
 """
 import os
+import os
 import signal
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from models import ItemStatus, LogEntry, LogLevel, ProgressPoint, SessionStatus, TrackingItem, TrackingSession
@@ -130,7 +132,7 @@ def apply_update(session: TrackingSession, body: Dict[str, Any]) -> None:
     """Applique un dictionnaire de mise a jour (format PUT /sessions/{id}).
 
     Cles reconnues : name, processed, total, status, extra, log, log_level,
-    item, items (upsert), replace_items, pid.
+    item, items (upsert), replace_items.
     Les cles inconnues sont ignorees.
     """
     if "name" in body and str(body["name"]).strip():
@@ -141,8 +143,8 @@ def apply_update(session: TrackingSession, body: Dict[str, Any]) -> None:
         set_processed(session, body["processed"])
     if "extra" in body and isinstance(body["extra"], dict):
         session.extra = {**session.extra, **body["extra"]}
-    if "pid" in body and body["pid"] is not None:
-        session.pid = int(body["pid"])
+    # « pid » n'est volontairement plus accepte ici : seul le serveur enregistre un pid,
+    # apres verification du proprietaire et de l'heure de demarrage (voir api.register_pid).
     if "log" in body and body["log"]:
         add_log(session, body["log"], str(body.get("log_level", "info")))
     if isinstance(body.get("item"), dict):
@@ -177,8 +179,41 @@ def fail(session: TrackingSession, message: str) -> None:
 # Signaux processus (stop / kill)
 # ---------------------------------------------------------------------------
 
+def process_starttime(pid: int) -> Optional[int]:
+    """Heure de demarrage du processus (jiffies depuis le boot), None s'il n'existe pas."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return None
+    # le nom du programme peut contenir des espaces et des parentheses : on coupe apres le dernier ')'
+    try:
+        return int(stat[stat.rindex(")") + 2:].split()[19])
+    except (ValueError, IndexError):
+        return None
+
+
+def owned_by_us(pid: int) -> bool:
+    """Le processus appartient-il a l'utilisateur qui fait tourner le serveur ?"""
+    try:
+        return os.stat(f"/proc/{pid}").st_uid == os.getuid()
+    except OSError:
+        return False
+
+
 def signal_process(session: TrackingSession, sig: int) -> Optional[str]:
-    """Envoie sig au pid de la session s'il existe. Retourne un message ou None."""
+    """Envoie sig au pid de la session s'il existe. Retourne un message ou None.
+
+    Refus si le processus n'a pas ete enregistre par le serveur (empreinte absente),
+    s'il ne nous appartient pas, ou si son heure de demarrage a change : dans ce cas le
+    numero a ete recycle par un autre programme, et le signal frapperait une victime au hasard.
+    """
+    if session.pid:
+        if session.pid_starttime is None:
+            return f"pid {session.pid} non enregistre par le serveur : signal refuse"
+        if not owned_by_us(session.pid):
+            return f"pid {session.pid} : processus d'un autre utilisateur, signal refuse"
+        if process_starttime(session.pid) != session.pid_starttime:
+            return f"pid {session.pid} recycle par un autre processus : signal refuse"
     if not session.pid:
         return None
     try:

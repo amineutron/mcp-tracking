@@ -21,6 +21,30 @@ Environment=PYTHONUNBUFFERED=1
 # credentials chiffres avec la cle systeme).
 
 NoNewPrivileges=true
+# Securite (issue #40) : le poller ne fait que lire des API locales et ecrire son etat.
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@STATE@
+PrivateTmp=true
+# le poller lit le jeton ecrit par l'API dans son RuntimeDirectory
+ReadWritePaths=/run/tracking
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

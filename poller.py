@@ -26,6 +26,21 @@ CREDS_DIR = Path(__file__).parent / "credentials"
 
 TRACKING_API   = "http://127.0.0.1:8765"
 
+def _tracking_token() -> str:
+    """Jeton local de l'API tracking (issue #40) : fichier 0600 ecrit par api.py au demarrage."""
+    import os
+    from pathlib import Path as _P
+    for candidate in (os.environ.get("TRACKING_TOKEN_FILE"),
+                      "/run/tracking/token",
+                      f"{os.environ.get('XDG_RUNTIME_DIR') or f'/run/user/{os.getuid()}'}/tracking/token"):
+        if not candidate:
+            continue
+        try:
+            return _P(candidate).read_text().strip()
+        except OSError:
+            continue
+    return ""
+
 QBT_HOST       = "http://localhost:8080"
 QBT_USER       = "admin"
 QBT_POLL_SECS  = 10
@@ -100,6 +115,7 @@ def _api(method: str, path: str, body: dict = None) -> dict | None:
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("Content-Type", "application/json")
+    req.add_header("Authorization", f"Bearer {_tracking_token()}")  # issue #40
     try:
         with urllib.request.urlopen(req, timeout=5) as r:
             return json.loads(r.read().decode())

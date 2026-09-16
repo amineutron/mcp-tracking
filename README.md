@@ -584,7 +584,37 @@ Les 6 etapes DV trackees avec metriques temps reel :
 
 ## Securite
 
+### Modele de menace
+
+Deux attaquants realistes sur une machine de bureau :
+
+1. **Une page web ouverte dans le navigateur.** « localhost n'est pas une frontiere » : une page
+   peut emettre des requetes vers `127.0.0.1:8765`. Sans protection, elle pourrait creer des
+   sessions, en supprimer, et surtout demander l'envoi d'un signal a un processus.
+2. **Un autre utilisateur local** (ou un service compromis) qui tenterait de lire l'etat ou de
+   piloter l'API.
+
+### Mesures
+
 - `api.py` ecoute uniquement sur `127.0.0.1:8765` -- inaccessible depuis le reseau
+- **Jeton local obligatoire en ecriture** : genere au premier demarrage dans
+  `$XDG_RUNTIME_DIR/tracking/token` (droits 0600, donc illisible par un autre utilisateur), exige
+  en `Authorization: Bearer ...` sur POST, PUT et DELETE. Une page web ne peut pas le lire.
+- **Requetes de navigateur refusees** : tout en-tete `Origin` donne un 403, meme avec le jeton.
+- **En-tete `Host` verifie** (boucle locale uniquement) et `Content-Type: application/json` exige
+  en ecriture.
+- **Signaux limites aux processus enregistres par le serveur** : a la creation d'une session, le
+  serveur verifie que le `pid` annonce existe et appartient au meme utilisateur, puis releve son
+  heure de demarrage. `/stop` et `/kill` refusent d'agir si cette empreinte a change (numero de
+  processus recycle par un autre programme) ou si le pid n'a jamais ete enregistre. Le `pid` ne
+  peut plus etre modifie par un `PUT`. Chaque signal envoye est journalise.
+- **Services systemd durcis** : `ProtectSystem=strict`, `ProtectHome=read-only` avec le seul etat
+  en ecriture, `PrivateTmp`, `SystemCallFilter=@system-service`, `CapabilityBoundingSet=` vide,
+  `UMask=0077`. Verifiable avec `systemd-analyze security tracking-api.service`.
+- **Limite connue** : `lyra-daemon` garde un `sudo NOPASSWD` pour piloter la machine (services,
+  VMs, audio). Ce n'est pas le tracking qui l'accorde, et le durcir releve du projet Lyra ; tant
+  que ce daemon existe, un attaquant qui obtiendrait l'execution de code sous cet utilisateur
+  disposerait de ce pouvoir, independamment des protections ci-dessus.
 - n8n restreint a `127.0.0.1:5678` dans `docker-compose.yml`
 - `dv_webhook_server.py` ecoute sur `0.0.0.0:8787` (necessaire pour recevoir les webhooks Docker) -- proteger ce port avec un firewall si la machine est exposee
 - Les services systemd tournent avec `NoNewPrivileges=true`

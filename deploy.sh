@@ -19,11 +19,13 @@ done
 
 # Unites rendues depuis les modeles *.service.in : chemin du depot et utilisateur courant
 for u in tracking-api tracking-poller; do
-    sed -e "s#@DIR@#$DIR#g" -e "s#@USER@#$OWNER#g" "$DIR/$u.service.in" > "/etc/systemd/system/$u.service"
+    sed -e "s#@DIR@#$DIR#g" -e "s#@USER@#$OWNER#g" -e "s#@STATE@#$STATE#g" \
+        "$DIR/$u.service.in" > "/etc/systemd/system/$u.service"
 done
 systemctl daemon-reload
 systemctl enable --now tracking-api.service tracking-poller.service
 sleep 2
-systemctl is-active tracking-api.service tracking-poller.service
+systemctl is-active tracking-api.service tracking-poller.service || true
+sleep 3
 curl -sf http://127.0.0.1:8765/health && echo " -> API OK"
 curl -sf http://127.0.0.1:8765/sessions | python3 -c "import sys,json; print(len(json.load(sys.stdin)), 'session(s) chargee(s)')"

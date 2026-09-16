@@ -14,9 +14,34 @@ StandardOutput=journal
 StandardError=journal
 Environment=PYTHONUNBUFFERED=1
 
-# Securite : le service ne doit jamais etre accessible en dehors de localhost
-# Il ecoute deja sur 127.0.0.1:8765 mais on restreint aussi au niveau systemd
+# Securite (issue #40). L'API n'ecoute que sur 127.0.0.1 et exige un jeton en ecriture ;
+# systemd reduit en plus ce que le service peut atteindre si jamais il etait detourne.
 NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+# etat persistant (sessions) et dossier du jeton, seuls chemins ecrivables
+ReadWritePaths=@STATE@
+RuntimeDirectory=tracking
+RuntimeDirectoryMode=0700
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

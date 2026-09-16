@@ -11,9 +11,16 @@ import requests
 import api
 
 
+# En-tetes d'ecriture : l'API exige le jeton local depuis l'issue #40.
+AUTH: dict = {}
+
+
 @pytest.fixture
-def base_url():
+def base_url(tmp_path):
     """Demarre l'API reelle sur un port libre, l'arrete a la fin du test."""
+    token = api.ensure_token(tmp_path / "token")
+    AUTH.clear()
+    AUTH["Authorization"] = f"Bearer {token}"
     server = ThreadingHTTPServer(("127.0.0.1", 0), api.Handler)
     server.daemon_threads = True
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -26,7 +33,7 @@ def base_url():
 def create_session(base_url: str, **overrides) -> str:
     payload = {"name": "session de test", "template": "machine"}
     payload.update(overrides)
-    r = requests.post(f"{base_url}/sessions", json=payload, timeout=5)
+    r = requests.post(f"{base_url}/sessions", json=payload, timeout=5, headers=AUTH)
     assert r.status_code == 201
     return r.json()["id"]
 
@@ -48,12 +55,12 @@ def test_get_unknown_session_404(base_url):
 
 def test_put_unknown_session_404(base_url):
     r = requests.put(f"{base_url}/sessions/inexistant",
-                     json={"processed": 1}, timeout=5)
+                     json={"processed": 1}, timeout=5, headers=AUTH)
     assert r.status_code == 404
 
 
 def test_delete_unknown_session_404(base_url):
-    r = requests.delete(f"{base_url}/sessions/inexistant", timeout=5)
+    r = requests.delete(f"{base_url}/sessions/inexistant", timeout=5, headers=AUTH)
     assert r.status_code == 404
 
 
@@ -109,7 +116,7 @@ def test_update_progress_status_and_log(base_url):
         "status": "done",
         "log": "conversion terminee",
         "extra": {"fichier": "film.mkv"},
-    }, timeout=5)
+    }, timeout=5, headers=AUTH)
     assert r.status_code == 200
 
     data = requests.get(f"{base_url}/sessions/{sid}", timeout=5).json()
@@ -129,7 +136,7 @@ def test_update_item_by_name(base_url):
     r = requests.put(f"{base_url}/sessions/{sid}", json={
         "item": {"name": "Etape 1", "status": "done",
                  "processed": 100, "note": "ok"},
-    }, timeout=5)
+    }, timeout=5, headers=AUTH)
     assert r.status_code == 200
 
     items = requests.get(f"{base_url}/sessions/{sid}", timeout=5).json()["items"]
@@ -145,7 +152,7 @@ def test_invalid_status_is_ignored(base_url):
     sid = create_session(base_url)
 
     r = requests.put(f"{base_url}/sessions/{sid}",
-                     json={"status": "statut_invalide"}, timeout=5)
+                     json={"status": "statut_invalide"}, timeout=5, headers=AUTH)
     assert r.status_code == 200
 
     data = requests.get(f"{base_url}/sessions/{sid}", timeout=5).json()
@@ -155,6 +162,65 @@ def test_invalid_status_is_ignored(base_url):
 def test_delete_session(base_url):
     sid = create_session(base_url)
 
-    r = requests.delete(f"{base_url}/sessions/{sid}", timeout=5)
+    r = requests.delete(f"{base_url}/sessions/{sid}", timeout=5, headers=AUTH)
     assert r.status_code == 200
     assert requests.get(f"{base_url}/sessions/{sid}", timeout=5).status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Issue #40 : l'API locale n'est pas pilotable par une page web
+# ---------------------------------------------------------------------------
+
+def test_ecriture_sans_jeton_401(base_url):
+    r = requests.post(f"{base_url}/sessions", json={"name": "x", "template": "free"}, timeout=5)
+    assert r.status_code == 401
+
+
+def test_ecriture_mauvais_jeton_401(base_url):
+    r = requests.post(f"{base_url}/sessions", json={"name": "x", "template": "free"},
+                      headers={"Authorization": "Bearer faux"}, timeout=5)
+    assert r.status_code == 401
+
+
+def test_requete_depuis_un_navigateur_403(base_url):
+    """Un en-tete Origin signe une requete emise par une page web : refusee, meme avec le jeton."""
+    for method, kwargs in (("get", {}), ("post", {"json": {"name": "x", "template": "free"}})):
+        r = getattr(requests, method)(f"{base_url}/sessions",
+                                      headers={**AUTH, "Origin": "https://exemple.test"}, timeout=5, **kwargs)
+        assert r.status_code == 403
+
+
+def test_hote_non_local_403(base_url):
+    r = requests.get(f"{base_url}/sessions", headers={"Host": "tracking.exemple.test"}, timeout=5)
+    assert r.status_code == 403
+
+
+def test_type_de_contenu_refuse_415(base_url):
+    r = requests.post(f"{base_url}/sessions", data="name=x",
+                      headers={**AUTH, "Content-Type": "application/x-www-form-urlencoded"}, timeout=5)
+    assert r.status_code == 415
+
+
+def test_lecture_toujours_libre(base_url):
+    assert requests.get(f"{base_url}/health", timeout=5).status_code == 200
+
+
+def test_pid_non_enregistre_pas_de_signal(base_url):
+    """Un pid fourni par le client est verifie par le serveur ; s'il est inutilisable,
+    il n'est pas enregistre et aucun signal ne partira (issue #40)."""
+    sid = create_session(base_url, pid=999999)          # pid inexistant
+    r = requests.get(f"{base_url}/sessions/{sid}", timeout=5)
+    assert r.json()["pid"] is None
+    r = requests.post(f"{base_url}/sessions/{sid}/kill", headers=AUTH, timeout=5)
+    assert r.status_code == 200 and r.json()["signal"] is None
+
+
+def test_pid_recycle_refuse():
+    """Meme pid, autre processus : l'empreinte de demarrage ne correspond plus, signal refuse."""
+    import os
+    import mutations
+    from models import TrackingSession
+    session = TrackingSession(name="x", template="free", pid=os.getpid(),
+                              pid_starttime=(mutations.process_starttime(os.getpid()) or 0) + 1)
+    note = mutations.stop(session)
+    assert "recycle" in note and "refuse" in note

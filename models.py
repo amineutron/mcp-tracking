@@ -64,6 +64,9 @@ class TrackingSession(BaseModel):
     extra: Dict[str, Any] = {}  # champs specifiques au template
     history: List[ProgressPoint] = []  # fenetre glissante de progression
     pid: Optional[int] = None  # processus a signaler pour stop / kill
+    # Heure de demarrage du processus (champ 22 de /proc/<pid>/stat) relevee par le serveur a
+    # l'enregistrement : un PID recycle par un autre programme n'aura pas la meme empreinte.
+    pid_starttime: Optional[int] = None
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
     finished_at: Optional[datetime] = None
