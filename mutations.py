@@ -6,7 +6,6 @@ auto-completion, upsert d'items.
 Chaque fonction mute la session recue (appelee sous storage.modify()).
 """
 import os
-import os
 import signal
 from datetime import datetime
 from pathlib import Path

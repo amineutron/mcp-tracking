@@ -10,7 +10,6 @@ import requests
 
 import api
 
-
 # En-tetes d'ecriture : l'API exige le jeton local depuis l'issue #40.
 AUTH: dict = {}
 
@@ -218,6 +217,7 @@ def test_pid_non_enregistre_pas_de_signal(base_url):
 def test_pid_recycle_refuse():
     """Meme pid, autre processus : l'empreinte de demarrage ne correspond plus, signal refuse."""
     import os
+
     import mutations
     from models import TrackingSession
     session = TrackingSession(name="x", template="free", pid=os.getpid(),
