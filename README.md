@@ -115,6 +115,20 @@ auto-completion quand tous les items sont termines.
 
 ---
 
+## Installation en une ligne
+
+```bash
+uvx mcp-tracking          # serveur MCP (stdio) ; avant publication : uvx --from git+https://github.com/amineutron/mcp-tracking mcp-tracking
+uvx --from mcp-tracking mcp-tracking-api   # API HTTP 127.0.0.1:8765
+uvx --from mcp-tracking mcp-tracking-ui    # tableau de bord terminal
+```
+
+Configuration Claude Desktop / Claude Code (`mcpServers`) :
+
+```json
+{ "tracking": { "command": "uvx", "args": ["mcp-tracking"] } }
+```
+
 ## Installation
 
 ```bash
