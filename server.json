@@ -1,0 +1,39 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.amineutron/mcp-tracking",
+  "title": "Task tracking (sessions, ETA, dashboard)",
+  "description": "Track long-running tasks in real time: sessions, steps, speed, ETA, HTTP API and TUI dashboard.",
+  "repository": {
+    "url": "https://github.com/amineutron/mcp-tracking",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/amineutron/mcp-tracking#readme",
+  "version": "0.2.1",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "mcp-tracking",
+      "runtimeHint": "uvx",
+      "version": "0.2.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "TRACKING_STATE_DIR",
+          "description": "Directory of the shared state file (default: XDG state dir)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "TRACKING_TOKEN_FILE",
+          "description": "File holding the local token required by the HTTP API",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

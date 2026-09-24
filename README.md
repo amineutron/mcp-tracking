@@ -1,4 +1,5 @@
 # MCP Tracking
+<!-- mcp-name: io.github.amineutron/mcp-tracking -->
 
 [![tests](https://github.com/amineutron/mcp-tracking/actions/workflows/tests.yml/badge.svg)](https://github.com/amineutron/mcp-tracking/actions/workflows/tests.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 
