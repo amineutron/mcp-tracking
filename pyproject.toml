@@ -1,6 +1,6 @@
 [project]
 name = "mcp-tracking"
-version = "0.1.0"
+version = "0.2.0"
 description = "MCP server, HTTP API and Textual TUI dashboard to track long-running tasks in real time"
 readme = "README.md"
 license = { text = "MIT" }
