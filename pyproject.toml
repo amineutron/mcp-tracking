@@ -1,7 +1,8 @@
 [project]
 name = "mcp-tracking"
 version = "0.2.1"
-description = "MCP server, HTTP API and Textual TUI dashboard to track long-running tasks in real time"
+description = "Local-first, self-hosted MCP server, HTTP API and Textual TUI dashboard to track long-running tasks of LLM agents in real time"
+keywords = ["mcp", "mcp-server", "local-first", "self-hosted", "on-prem", "llm-agents", "task-tracking", "textual"]
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "amineutron" }]
