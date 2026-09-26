@@ -11,6 +11,33 @@ les sessions depuis le media-server (qBittorrent, Bazarr, conversion DV).
 
 ---
 
+## Pourquoi c'est conçu pour des agents LLM
+
+Un agent LLM (grand modèle de langage) qui lance une tâche longue (conversion, clone de VM,
+téléchargement) ne peut pas rester bloqué à la regarder, et il ne voit rien de ce qui se
+passe entre deux de ses tours. Ce serveur lui sert de mémoire de travail partagée :
+
+- **Un bus de progression commun.** L'agent, les scripts shell et les pollers écrivent
+  dans les mêmes sessions (outils MCP ou API HTTP locale sur 127.0.0.1:8765) : l'agent
+  lance la tâche, rend la main, et relit l'état plus tard avec `tracking_get`.
+- **Des métriques calculées, pas devinées.** Vitesse lissée sur 2 minutes, ETA, temps
+  écoulé (`metrics.py`) : l'agent reçoit des chiffres au lieu d'extrapoler lui-même.
+- **Une tâche muette se voit.** Une session `running` sans mise à jour depuis 10 minutes
+  est marquée `stale` : l'agent distingue « encore en cours » de « processus mort ».
+- **Arrêter vise le bon processus.** Une session peut porter le `pid` de son processus ;
+  l'heure de démarrage relevée dans `/proc` évite de signaler un pid réutilisé par un
+  autre programme. `tracking_stop` envoie SIGTERM et garde la session, `tracking_kill`
+  envoie SIGKILL et la supprime.
+- **Pas de mise à jour perdue.** L'état est un fichier JSON local, protégé par un verrou
+  `flock` et réécrit de façon atomique (`storage.py`) : plusieurs agents et scripts peuvent
+  écrire en même temps.
+- **Des gabarits par type de tâche** (`download`, `machine`, `movie`, `lyra_task`, `free`)
+  pour que chaque agent décrive son travail de la même façon.
+
+Local-first et self-hosted : aucun cloud, aucune télémétrie, tout reste sur la machine
+(on-prem). Utilisé par [Lyra](https://github.com/amineutron/lyra), l'assistant vocal
+French-first, et par n'importe quel client MCP (Claude Code, Claude Desktop...).
+
 ## Demo
 
 ![Dashboard terminal alimente par les simulations du mode test](docs/assets/demo.gif)
@@ -19,6 +46,7 @@ Enregistree avec [`docs/demo/record.sh`](docs/demo/record.sh) : `server.py --tes
 
 ## Sommaire
 
+- [Pourquoi c'est conçu pour des agents LLM](#pourquoi-cest-conçu-pour-des-agents-llm)
 - [Architecture](#architecture)
 - [Installation](#installation)
 - [Services systemd](#services-systemd)
@@ -672,7 +700,7 @@ touchent jamais l'etat de production.
 
 | Dépôt | Rôle |
 |---|---|
-| [lyra](https://github.com/amineutron/lyra) | assistant DevOps vocal, local par défaut (AGPL-3.0) |
+| [lyra](https://github.com/amineutron/lyra) | French-first voice assistant : assistant DevOps vocal, local par défaut (AGPL-3.0) ; le français familier est compris par des règles avant même d'appeler un modèle, ce qui lui suffit d'un modèle de 0.5B |
 | [fedora-agents](https://github.com/amineutron/fedora-agents) | MCP : machines virtuelles KVM et sauvegardes |
 | [mcp-tracking](https://github.com/amineutron/mcp-tracking) | MCP + API + tableau de bord des tâches longues |
 | [neutroncore](https://github.com/amineutron/neutroncore) | hub PWA du homelab |
