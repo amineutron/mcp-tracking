@@ -24,7 +24,7 @@ mcp-tracking-api = "api:main"
 mcp-tracking-ui = "ui:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "requests>=2.31"]
+dev = ["pytest>=9.1.1", "requests>=2.31"]
 
 [build-system]
 requires = ["hatchling"]
