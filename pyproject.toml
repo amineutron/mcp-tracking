@@ -9,7 +9,7 @@ authors = [{ name = "amineutron" }]
 requires-python = ">=3.11"
 dependencies = [
     "mcp[cli]>=2.3.0,<3",
-    "pydantic>=2.0",
+    "pydantic>=2.14.1",
     "textual>=0.80.0",
 ]
 
