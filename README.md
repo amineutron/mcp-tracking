@@ -643,6 +643,13 @@ Deux attaquants realistes sur une machine de bureau :
 - **Jeton local obligatoire en ecriture** : genere au premier demarrage dans
   `$XDG_RUNTIME_DIR/tracking/token` (droits 0600, donc illisible par un autre utilisateur), exige
   en `Authorization: Bearer ...` sur POST, PUT et DELETE. Une page web ne peut pas le lire.
+  Lance par le service systemd, le fichier est `/run/tracking/token` (son `RuntimeDirectory`).
+  Un client le cherche dans cet ordre : `TRACKING_TOKEN_FILE`, `/run/tracking/token`, puis
+  `$XDG_RUNTIME_DIR/tracking/token`.
+- **Refus journalises** : chaque 401 ou 403 laisse une ligne `refus <code> <methode> <route>
+  (<raison>) client=<User-Agent>` dans le journal du service (`journalctl -u tracking-api`), au
+  plus une toutes les 10 minutes par client et par route ; le jeton envoye n'y figure jamais.
+  Un client qui oublie le jeton et avale l'erreur se voit donc la.
 - **Requetes de navigateur refusees** : tout en-tete `Origin` donne un 403, meme avec le jeton.
 - **En-tete `Host` verifie** (boucle locale uniquement) et `Content-Type: application/json` exige
   en ecriture.
