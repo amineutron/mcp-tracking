@@ -1,7 +1,10 @@
 # À chaque tag v* : build du wheel, publication PyPI par Trusted Publishing
 # (environnement "pypi" déclaré côté PyPI et côté dépôt), release GitHub avec
 # des notes générées par git-cliff depuis les commits conventionnels, le wheel
-# et le sdist attachés.
+# et le sdist attachés, plus sbom.json (inventaire CycloneDX des composants,
+# versions exactes de uv.lock). Wheel et sdist portent deux attestations
+# Sigstore : provenance et SBOM. Vérification :
+#   gh attestation verify <fichier> --owner amineutron
 #
 # Le workflow est volontairement autonome : PyPI refuse les jetons OIDC émis
 # depuis un workflow réutilisable (claim job_workflow_ref différent du dépôt,
@@ -15,14 +18,38 @@ jobs:
   build:
     if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write          # certificat Sigstore des attestations
+      attestations: write
+      artifact-metadata: write
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
+      - name: uv.lock à jour avec pyproject.toml
+        run: uv lock --check
       - run: uv build
+      - name: Inventaire des composants (SBOM CycloneDX)
+        run: |
+          mkdir -p sbom
+          uv export --frozen --no-dev --format cyclonedx1.5 -o sbom/sbom.json > /dev/null
+      - name: Attestation de provenance (wheel et sdist)
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/*
+      - name: Attestation SBOM (wheel et sdist)
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/*
+          sbom-path: sbom/sbom.json
       - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: sbom/
   publish:
     if: ${{ github.event_name == 'push' }}
     needs: build
@@ -40,6 +67,10 @@ jobs:
         with:
           name: dist
           path: dist/
+      - uses: actions/download-artifact@v8
+        with:
+          name: sbom
+          path: sbom/
       - uses: pypa/gh-action-pypi-publish@release/v1
       - name: Notes de release (git-cliff, cliff.toml)
         run: uvx git-cliff@2.14.2 --latest --strip all -o RELEASE_NOTES.md
@@ -49,7 +80,7 @@ jobs:
         run: |
           gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1 \
             || gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --title "${GITHUB_REF_NAME}" --notes-file RELEASE_NOTES.md
-          gh release upload "${GITHUB_REF_NAME}" dist/* --repo "${GITHUB_REPOSITORY}" --clobber
+          gh release upload "${GITHUB_REF_NAME}" dist/* sbom/sbom.json --repo "${GITHUB_REPOSITORY}" --clobber
   # Registre MCP officiel : publie server.json (meme version que le paquet) par
   # OIDC GitHub, sans connexion manuelle. Aussi lancable seul (workflow_dispatch)
   # pour remettre le registre a jour sans refaire de release.

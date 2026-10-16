@@ -651,6 +651,10 @@ Deux attaquants realistes sur une machine de bureau :
   heure de demarrage. `/stop` et `/kill` refusent d'agir si cette empreinte a change (numero de
   processus recycle par un autre programme) ou si le pid n'a jamais ete enregistre. Le `pid` ne
   peut plus etre modifie par un `PUT`. Chaque signal envoye est journalise.
+- **Versions verifiables** : `uv.lock` controle en CI, et chaque release GitHub joint `sbom.json`
+  (inventaire CycloneDX des dependances aux versions du lock) ; wheel et sdist portent une
+  attestation de provenance et une attestation SBOM signees par Sigstore
+  (`gh attestation verify <fichier> --owner amineutron`).
 - **Services systemd durcis** : `ProtectSystem=strict`, `ProtectHome=read-only` avec le seul etat
   en ecriture, `PrivateTmp`, `SystemCallFilter=@system-service`, `CapabilityBoundingSet=` vide,
   `UMask=0077`. Verifiable avec `systemd-analyze security tracking-api.service`.

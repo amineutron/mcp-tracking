@@ -8,4 +8,6 @@ tracking_state.json
 poller_state.json
 *.tmp
 *.lock
+# le verrou de l'etat (tracking_state.lock) est ignore, pas le lock des dependances
+!uv.lock
 .claude-sync/
