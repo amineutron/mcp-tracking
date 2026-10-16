@@ -224,3 +224,61 @@ def test_pid_recycle_refuse():
                               pid_starttime=(mutations.process_starttime(os.getpid()) or 0) + 1)
     note = mutations.stop(session)
     assert "recycle" in note and "refuse" in note
+
+
+# ---------------------------------------------------------------------------
+# Refus journalises : un client sans jeton ne doit plus echouer en silence
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def journal_refus(caplog, monkeypatch):
+    monkeypatch.setattr(api, "_refusals_logged", {})
+    caplog.set_level("WARNING", logger="tracking-api")
+    return caplog
+
+
+def _lignes_refus(caplog):
+    return [r.getMessage() for r in caplog.records if "refus" in r.getMessage()]
+
+
+def test_refus_journalise_sans_le_jeton(base_url, journal_refus):
+    requests.put(f"{base_url}/sessions/abc123", json={"log": "x"}, timeout=5,
+                 headers={"User-Agent": "client-essai/1.0", "Authorization": "Bearer secret-faux"})
+    lignes = _lignes_refus(journal_refus)
+    assert len(lignes) == 1
+    assert "401" in lignes[0] and "PUT" in lignes[0] and "/sessions" in lignes[0]
+    assert "client-essai/1.0" in lignes[0]
+    assert "secret-faux" not in lignes[0]
+
+
+def test_refus_repetes_journalises_une_fois(base_url, journal_refus):
+    """Un client casse qui reessaie toutes les 5 s ne doit pas inonder le journal."""
+    for sid in ("aaa111", "bbb222", "ccc333"):
+        requests.put(f"{base_url}/sessions/{sid}", json={"log": "x"}, timeout=5)
+    requests.post(f"{base_url}/sessions", json={"name": "x", "template": "free"}, timeout=5)
+    lignes = _lignes_refus(journal_refus)
+    assert len(lignes) == 2  # un PUT /sessions/<id> + un POST /sessions
+
+
+def test_refus_navigateur_journalise(base_url, journal_refus):
+    requests.get(f"{base_url}/sessions", headers={"Origin": "https://exemple.test"}, timeout=5)
+    lignes = _lignes_refus(journal_refus)
+    assert len(lignes) == 1 and "403" in lignes[0] and "exemple.test" in lignes[0]
+
+
+def test_refus_rejournalise_apres_le_delai(monkeypatch):
+    monkeypatch.setattr(api, "_refusals_logged", {})
+    cle = (401, "PUT", "/sessions/{id}", "curl/8")
+    assert api.should_log_refusal(cle, now=1000.0)
+    assert not api.should_log_refusal(cle, now=1000.0 + api.REFUSAL_LOG_EVERY_S - 1)
+    assert api.should_log_refusal(cle, now=1000.0 + api.REFUSAL_LOG_EVERY_S + 1)
+
+
+@pytest.mark.parametrize("chemin, attendu", [
+    ("/sessions", "/sessions"),
+    ("/sessions/abc123", "/sessions/{id}"),
+    ("/sessions/abc123/stop?x=1", "/sessions/{id}/stop"),
+    ("/health", "/health"),
+])
+def test_route_sans_identifiant(chemin, attendu):
+    assert api.route_shape(chemin) == attendu

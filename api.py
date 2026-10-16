@@ -64,6 +64,32 @@ _TOKEN = ""
 
 log = logging.getLogger("tracking-api")
 MAX_BODY_BYTES = 2 * 1024 * 1024
+
+# Refus journalises (401/403) : sans cela un client qui n'envoie pas le jeton echoue en
+# silence, ses try/except avalant la reponse. Une ligne par client et par route toutes les
+# REFUSAL_LOG_EVERY_S secondes au plus, pour qu'un client qui reessaie en boucle n'inonde
+# pas le journal. Le jeton envoye n'est jamais ecrit.
+REFUSAL_LOG_EVERY_S = 600
+_refusals_logged: Dict[tuple, float] = {}
+_refusals_lock = threading.Lock()
+
+
+def route_shape(path: str) -> str:
+    """Chemin sans requete ni identifiant de session : /sessions/abc/stop -> /sessions/{id}/stop."""
+    parts = [p for p in urlparse(path).path.split("/") if p]
+    if len(parts) >= 2 and parts[0] == "sessions":
+        parts[1] = "{id}"
+    return "/" + "/".join(parts)
+
+
+def should_log_refusal(key: tuple, now: Optional[float] = None) -> bool:
+    now = time.monotonic() if now is None else now
+    with _refusals_lock:
+        last = _refusals_logged.get(key)
+        if last is not None and now - last < REFUSAL_LOG_EVERY_S:
+            return False
+        _refusals_logged[key] = now
+        return True
 SSE_POLL_S = 0.5
 SSE_HEARTBEAT_S = 15.0
 PURGE_INTERVAL_S = 3600
@@ -190,6 +216,14 @@ class Handler(BaseHTTPRequestHandler):
     def _error(self, code: int, message: str) -> None:
         self._respond(code, {"ok": False, "error": message})
 
+    def _refuse(self, code: int, message: str, reason: str) -> None:
+        """Refuse la requete et le note dans le journal (au plus une ligne par client et route)."""
+        agent = (self.headers.get("User-Agent") or "inconnu")[:80]
+        route = route_shape(self.path)
+        if should_log_refusal((code, self.command, route, agent)):
+            log.warning("refus %s %s %s (%s) client=%s", code, self.command, route, reason, agent)
+        self._error(code, message)
+
     def _body(self) -> Optional[dict]:
         try:
             n = int(self.headers.get("Content-Length", 0))
@@ -220,17 +254,19 @@ class Handler(BaseHTTPRequestHandler):
         - l'en-tete Host doit designer la boucle locale ;
         - toute ecriture exige le jeton local (Authorization: Bearer ...) et du JSON.
         """
-        if self.headers.get("Origin"):
-            self._error(403, "requete issue d'un navigateur refusee")
+        origin = self.headers.get("Origin")
+        if origin:
+            self._refuse(403, "requete issue d'un navigateur refusee", f"origine {origin}")
             return False
         host = (self.headers.get("Host") or "").split(":")[0]
         if host and host not in ("127.0.0.1", "localhost", "::1", "[::1]"):
-            self._error(403, f"hote non local refuse : {host}")
+            self._refuse(403, f"hote non local refuse : {host}", f"hote {host}")
             return False
         if self.command in WRITE_METHODS:
             sent = (self.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
             if not _TOKEN or not hmac.compare_digest(sent, _TOKEN):
-                self._error(401, f"jeton requis : lire {TOKEN_PATH}")
+                self._refuse(401, f"jeton requis : lire {TOKEN_PATH}",
+                             "jeton absent" if not sent else "jeton invalide")
                 return False
             ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip()
             if ctype and ctype != "application/json":
