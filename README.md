@@ -642,9 +642,9 @@ Deux attaquants realistes sur une machine de bureau :
 - `api.py` ecoute uniquement sur `127.0.0.1:8765` -- inaccessible depuis le reseau
 - **Jeton local obligatoire en ecriture** : genere au premier demarrage dans
   `$XDG_RUNTIME_DIR/tracking/token` (droits 0600, donc illisible par un autre utilisateur), exige
-  en `Authorization: Bearer ...` sur POST, PUT et DELETE. Une page web ne peut pas le lire.
+  en `Authorization: Bearer ...` sur POST, PUT et DELETE. Une page web ne peut pas le lire. Recuperation par les clients : voir [docs/api-token.md](docs/api-token.md).
 - **Requetes de navigateur refusees** : tout en-tete `Origin` donne un 403, meme avec le jeton.
-- **En-tete `Host` verifie** (boucle locale uniquement) et `Content-Type: application/json` exige
+- **En-tete `Host` verifie** (boucle locale uniquement, port d'ecoute verifie s'il est precise) et `Content-Type: application/json` exige
   en ecriture.
 - **Signaux limites aux processus enregistres par le serveur** : a la creation d'une session, le
   serveur verifie que le `pid` annonce existe et appartient au meme utilisateur, puis releve son

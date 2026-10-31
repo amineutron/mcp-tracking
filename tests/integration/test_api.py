@@ -224,3 +224,65 @@ def test_pid_recycle_refuse():
                               pid_starttime=(mutations.process_starttime(os.getpid()) or 0) + 1)
     note = mutations.stop(session)
     assert "recycle" in note and "refuse" in note
+
+
+# ---------------------------------------------------------------------------
+# Issue #4 : durcissement Host (port) / Origin / jeton
+# ---------------------------------------------------------------------------
+
+def _port(base_url: str) -> str:
+    return base_url.rsplit(":", 1)[1]
+
+
+@pytest.mark.parametrize("method", ["put", "delete"])
+def test_origine_externe_403_sur_put_et_delete(base_url, method):
+    sid = create_session(base_url)
+    r = getattr(requests, method)(f"{base_url}/sessions/{sid}", json={"log": "x"},
+                                  headers={**AUTH, "Origin": "https://evil.test"}, timeout=5)
+    assert r.status_code == 403
+    assert requests.get(f"{base_url}/sessions/{sid}", timeout=5).status_code == 200
+
+
+def test_origine_locale_refusee_aussi(base_url):
+    """Un autre serveur local (localhost:3000) reste une page web : pas d'exception."""
+    r = requests.post(f"{base_url}/sessions", json={"name": "x", "template": "free"},
+                      headers={**AUTH, "Origin": "http://localhost:3000"}, timeout=5)
+    assert r.status_code == 403
+
+
+def test_host_avec_port_attendu_accepte(base_url):
+    for host in ("127.0.0.1", "localhost", f"localhost:{_port(base_url)}",
+                 f"127.0.0.1:{_port(base_url)}"):
+        r = requests.get(f"{base_url}/health", headers={"Host": host}, timeout=5)
+        assert r.status_code == 200, host
+
+
+def test_host_avec_mauvais_port_403(base_url):
+    """DNS rebinding : meme nom local mais sur un autre port."""
+    r = requests.get(f"{base_url}/health", headers={"Host": "localhost:9999"}, timeout=5)
+    assert r.status_code == 403
+
+
+def test_host_absent_ou_trompeur_403(base_url):
+    for host in ("127.0.0.1.evil.test", "evil.test:80", "localhost@evil.test"):
+        r = requests.get(f"{base_url}/health", headers={"Host": host}, timeout=5)
+        assert r.status_code == 403, host
+
+
+def test_jeton_non_ascii_401_sans_erreur_serveur(base_url):
+    r = requests.post(f"{base_url}/sessions", json={"name": "x", "template": "free"},
+                      headers={"Authorization": "Bearer t\u00e9st".encode("latin-1")}, timeout=5)
+    assert r.status_code == 401
+
+
+def test_jeton_fichier_en_0600(tmp_path):
+    path = tmp_path / "sub" / "token"
+    api.ensure_token(path)
+    assert (path.stat().st_mode & 0o777) == 0o600
+    assert (path.parent.stat().st_mode & 0o777) == 0o700
+
+
+def test_erreur_401_ne_revele_pas_le_chemin_du_jeton(base_url):
+    r = requests.post(f"{base_url}/sessions", json={"name": "x", "template": "free"}, timeout=5)
+    assert r.status_code == 401
+    assert "/" not in r.text
