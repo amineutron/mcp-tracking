@@ -286,3 +286,137 @@ def test_erreur_401_ne_revele_pas_le_chemin_du_jeton(base_url):
     r = requests.post(f"{base_url}/sessions", json={"name": "x", "template": "free"}, timeout=5)
     assert r.status_code == 401
     assert "/" not in r.text
+
+
+# ---------------------------------------------------------------------------
+# Refus journalises : un client sans jeton ne doit plus echouer en silence
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def journal_refus(caplog, monkeypatch):
+    monkeypatch.setattr(api, "_refusals_logged", {})
+    caplog.set_level("WARNING", logger="tracking-api")
+    return caplog
+
+
+def _lignes_refus(caplog):
+    return [r.getMessage() for r in caplog.records if "refus" in r.getMessage()]
+
+
+def test_refus_journalise_sans_le_jeton(base_url, journal_refus):
+    requests.put(f"{base_url}/sessions/abc123", json={"log": "x"}, timeout=5,
+                 headers={"User-Agent": "client-essai/1.0", "Authorization": "Bearer secret-faux"})
+    lignes = _lignes_refus(journal_refus)
+    assert len(lignes) == 1
+    assert "401" in lignes[0] and "PUT" in lignes[0] and "/sessions" in lignes[0]
+    assert "client-essai/1.0" in lignes[0]
+    assert "secret-faux" not in lignes[0]
+
+
+def test_refus_repetes_journalises_une_fois(base_url, journal_refus):
+    """Un client casse qui reessaie toutes les 5 s ne doit pas inonder le journal."""
+    for sid in ("aaa111", "bbb222", "ccc333"):
+        requests.put(f"{base_url}/sessions/{sid}", json={"log": "x"}, timeout=5)
+    requests.post(f"{base_url}/sessions", json={"name": "x", "template": "free"}, timeout=5)
+    lignes = _lignes_refus(journal_refus)
+    assert len(lignes) == 2  # un PUT /sessions/<id> + un POST /sessions
+
+
+def test_refus_navigateur_journalise(base_url, journal_refus):
+    requests.get(f"{base_url}/sessions", headers={"Origin": "https://exemple.test"}, timeout=5)
+    lignes = _lignes_refus(journal_refus)
+    assert len(lignes) == 1 and "403" in lignes[0] and "exemple.test" in lignes[0]
+
+
+def test_refus_rejournalise_apres_le_delai(monkeypatch):
+    monkeypatch.setattr(api, "_refusals_logged", {})
+    cle = (401, "PUT", "/sessions/{id}", "jeton absent")
+    assert api.should_log_refusal(cle, now=1000.0)
+    assert not api.should_log_refusal(cle, now=1000.0 + api.REFUSAL_LOG_EVERY_S - 1)
+    assert api.should_log_refusal(cle, now=1000.0 + api.REFUSAL_LOG_EVERY_S + 1)
+
+
+@pytest.mark.parametrize("chemin, attendu", [
+    ("/sessions", "/sessions"),
+    ("/sessions/abc123", "/sessions/{id}"),
+    ("/sessions/abc123/stop?x=1", "/sessions/{id}/stop"),
+    ("/health", "/health"),
+])
+def test_route_sans_identifiant(chemin, attendu):
+    assert api.route_shape(chemin) == attendu
+
+
+def test_refus_hote_journalise(base_url, journal_refus):
+    requests.get(f"{base_url}/health", headers={"Host": "evil.test"}, timeout=5)
+    lignes = _lignes_refus(journal_refus)
+    assert len(lignes) == 1 and "403" in lignes[0] and "evil.test" in lignes[0]
+
+
+def test_refus_ne_journalise_ni_jeton_ni_authorization_ni_chemin_du_jeton(base_url, journal_refus):
+    requests.put(f"{base_url}/sessions/abc123", json={"log": "x"}, timeout=5,
+                 headers={"Authorization": "Bearer secret-faux"})
+    requests.get(f"{base_url}/health", headers={"Host": "evil.test", "Authorization": "Bearer secret-faux"},
+                 timeout=5)
+    texte = "\n".join(r.getMessage() for r in journal_refus.records)
+    assert "secret-faux" not in texte and "Bearer" not in texte and "Authorization" not in texte
+    assert str(api.TOKEN_PATH) not in texte and api._TOKEN not in texte
+
+
+def test_refus_injection_de_journal_impossible(base_url, journal_refus):
+    """Un en-tete portant un saut de ligne ne doit jamais fabriquer une seconde ligne."""
+    for en_tete in ("User-Agent", "Origin"):
+        journal_refus.clear()
+        api._refusals_logged.clear()
+        valeur = "x\t\x01[INFO] fausse ligne\x7f" + "A" * 500
+        entetes = {"Origin": "https://ok.test", en_tete: valeur}
+        requests.get(f"{base_url}/sessions", timeout=5, headers=entetes)
+        lignes = _lignes_refus(journal_refus)
+        assert len(lignes) == 1
+        assert "\n" not in lignes[0] and "\r" not in lignes[0]
+        assert all(c.isprintable() for c in lignes[0])
+        assert len(lignes[0]) < 400
+
+
+def test_refus_nettoyage_direct():
+    sale = "a\r\n[INFO] fausse ligne\x00\x1f\x7f\u2028fin" + "B" * 300
+    propre = api.clean_for_log(sale)
+    assert all(c.isprintable() for c in propre) and len(propre) <= 80
+    assert api.clean_for_log(None) == "inconnu"
+
+
+class _FauxGestionnaire:
+    """Appel direct de Handler._refuse : 10 000 requetes HTTP reelles prendraient des minutes."""
+    command = "GET"
+
+    def __init__(self, path, headers):
+        self.path = path
+        self.headers = headers
+
+    def _error(self, code, message):
+        pass
+
+
+def test_refus_table_bornee_et_une_ligne_par_fenetre(journal_refus):
+    """10 000 refus avec des User-Agent et des Origin tous differents : une ligne, table bornee."""
+    for i in range(10_000):
+        faux = _FauxGestionnaire("/sessions", {"User-Agent": f"ua-{i}"})
+        api.Handler._refuse(faux, 403, "refus", "origine", f"https://x{i}.test")
+    assert len(_lignes_refus(journal_refus)) == 1
+    assert len(api._refusals_logged) <= api.REFUSAL_TABLE_MAX
+
+
+def test_refus_routes_variees_table_bornee(journal_refus):
+    for i in range(2_000):
+        api.Handler._refuse(_FauxGestionnaire(f"/x{i}", {}), 403, "refus", "origine")
+    assert len(api._refusals_logged) <= api.REFUSAL_TABLE_MAX
+
+
+def test_refus_table_evince_les_plus_anciennes_et_purge_les_expirees(monkeypatch):
+    monkeypatch.setattr(api, "_refusals_logged", {})
+    for i in range(api.REFUSAL_TABLE_MAX + 50):
+        assert api.should_log_refusal((401, "PUT", f"/r{i}", "jeton absent"), now=1000.0 + i / 1000)
+    assert len(api._refusals_logged) == api.REFUSAL_TABLE_MAX
+    assert (401, "PUT", "/r0", "jeton absent") not in api._refusals_logged
+    api.should_log_refusal((401, "PUT", "/neuf", "jeton absent"),
+                           now=1000.0 + api.REFUSAL_LOG_EVERY_S + 10)
+    assert list(api._refusals_logged) == [(401, "PUT", "/neuf", "jeton absent")]

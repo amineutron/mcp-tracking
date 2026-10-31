@@ -643,6 +643,12 @@ Deux attaquants realistes sur une machine de bureau :
 - **Jeton local obligatoire en ecriture** : genere au premier demarrage dans
   `$XDG_RUNTIME_DIR/tracking/token` (droits 0600, donc illisible par un autre utilisateur), exige
   en `Authorization: Bearer ...` sur POST, PUT et DELETE. Une page web ne peut pas le lire. Recuperation par les clients : voir [docs/api-token.md](docs/api-token.md).
+- **Refus journalises** : chaque 401 ou 403 laisse une ligne `refus <code> <methode> <route>
+  (<raison>) client=<User-Agent>` dans le journal du service (`journalctl -u tracking-api`), au
+  plus une toutes les 10 minutes par raison et par route (table bornee a 256 entrees) ; les
+  valeurs fournies par le client sont nettoyees (caracteres de controle retires, 80 caracteres
+  au plus, ecrites entre guillemets) et le jeton envoye n'y figure jamais.
+  Un client qui oublie le jeton et avale l'erreur se voit donc la.
 - **Requetes de navigateur refusees** : tout en-tete `Origin` donne un 403, meme avec le jeton.
 - **En-tete `Host` verifie** (boucle locale uniquement, port d'ecoute verifie s'il est precise) et `Content-Type: application/json` exige
   en ecriture.

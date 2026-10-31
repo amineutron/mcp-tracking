@@ -65,6 +65,50 @@ _TOKEN = ""
 
 log = logging.getLogger("tracking-api")
 MAX_BODY_BYTES = 2 * 1024 * 1024
+
+# Refus journalises (401/403) : sans cela un client qui n'envoie pas le jeton echoue en
+# silence, ses try/except avalant la reponse. Une ligne par raison et par route toutes les
+# REFUSAL_LOG_EVERY_S secondes au plus, pour qu'un client qui reessaie en boucle n'inonde
+# pas le journal. La table de dedoublonnage est bornee (REFUSAL_TABLE_MAX) car la route vient
+# du client. Les valeurs fournies par le client sont nettoyees avant d'etre ecrites ; le
+# jeton, l'en-tete Authorization et le chemin du fichier jeton ne le sont jamais.
+REFUSAL_LOG_EVERY_S = 600
+REFUSAL_TABLE_MAX = 256
+LOG_VALUE_MAX = 80
+_refusals_logged: Dict[tuple, float] = {}
+_refusals_lock = threading.Lock()
+
+
+def clean_for_log(value: Optional[str], limit: int = LOG_VALUE_MAX) -> str:
+    """Valeur cliente sure pour le journal : sans caractere de controle ni saut de ligne, tronquee."""
+    if not value:
+        return "inconnu"
+    return "".join(c for c in value if c.isprintable())[:limit] or "inconnu"
+
+
+def route_shape(path: str) -> str:
+    """Chemin sans requete ni identifiant de session : /sessions/abc/stop -> /sessions/{id}/stop."""
+    parts = [p for p in urlparse(path).path.split("/") if p]
+    if len(parts) >= 2 and parts[0] == "sessions":
+        parts[1] = "{id}"
+    return "/" + "/".join(parts)
+
+
+def should_log_refusal(key: tuple, now: Optional[float] = None) -> bool:
+    now = time.monotonic() if now is None else now
+    with _refusals_lock:
+        last = _refusals_logged.get(key)
+        if last is not None and now - last < REFUSAL_LOG_EVERY_S:
+            return False
+        for old in [k for k, t in _refusals_logged.items() if now - t >= REFUSAL_LOG_EVERY_S]:
+            del _refusals_logged[old]
+        _refusals_logged.pop(key, None)  # reinsere en fin : l'ordre suit la date
+        while len(_refusals_logged) >= REFUSAL_TABLE_MAX:
+            del _refusals_logged[next(iter(_refusals_logged))]
+        _refusals_logged[key] = now
+        return True
+
+
 SSE_POLL_S = 0.5
 SSE_HEARTBEAT_S = 15.0
 PURGE_INTERVAL_S = 3600
@@ -191,6 +235,19 @@ class Handler(BaseHTTPRequestHandler):
     def _error(self, code: int, message: str) -> None:
         self._respond(code, {"ok": False, "error": message})
 
+    def _refuse(self, code: int, message: str, reason: str, detail: Optional[str] = None) -> None:
+        """Refuse la requete et la note dans le journal (au plus une ligne par raison et route).
+
+        `reason` est un libelle fixe (sert de cle) ; `detail` vient du client : nettoye puis
+        ecrit via repr().
+        """
+        route = clean_for_log(route_shape(self.path))
+        if should_log_refusal((code, self.command, route, reason)):
+            agent = clean_for_log(self.headers.get("User-Agent"))
+            extra = f" {clean_for_log(detail)!r}" if detail is not None else ""
+            log.warning("refus %s %s %s (%s%s) client=%r", code, self.command, route, reason, extra, agent)
+        self._error(code, message)
+
     def _body(self) -> Optional[dict]:
         try:
             n = int(self.headers.get("Content-Length", 0))
@@ -221,15 +278,17 @@ class Handler(BaseHTTPRequestHandler):
         - l'en-tete Host doit designer la boucle locale ;
         - toute ecriture exige le jeton local (Authorization: Bearer ...) et du JSON.
         """
-        if self.headers.get("Origin"):
-            self._error(403, "requete issue d'un navigateur refusee")
+        origin = self.headers.get("Origin")
+        if origin:
+            self._refuse(403, "requete issue d'un navigateur refusee", "origine", origin)
             return False
         if not self._host_allowed():
-            self._error(403, "hote refuse")
+            self._refuse(403, "hote refuse", "hote", self.headers.get("Host"))
             return False
         if self.command in WRITE_METHODS:
             if not self._token_valid():
-                self._error(401, "jeton requis")
+                sent = self.headers.get("Authorization")
+                self._refuse(401, "jeton requis", "jeton absent" if not sent else "jeton invalide")
                 return False
             ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip()
             if ctype and ctype != "application/json":
