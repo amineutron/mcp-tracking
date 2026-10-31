@@ -227,6 +227,68 @@ def test_pid_recycle_refuse():
 
 
 # ---------------------------------------------------------------------------
+# Issue #4 : durcissement Host (port) / Origin / jeton
+# ---------------------------------------------------------------------------
+
+def _port(base_url: str) -> str:
+    return base_url.rsplit(":", 1)[1]
+
+
+@pytest.mark.parametrize("method", ["put", "delete"])
+def test_origine_externe_403_sur_put_et_delete(base_url, method):
+    sid = create_session(base_url)
+    r = getattr(requests, method)(f"{base_url}/sessions/{sid}", json={"log": "x"},
+                                  headers={**AUTH, "Origin": "https://evil.test"}, timeout=5)
+    assert r.status_code == 403
+    assert requests.get(f"{base_url}/sessions/{sid}", timeout=5).status_code == 200
+
+
+def test_origine_locale_refusee_aussi(base_url):
+    """Un autre serveur local (localhost:3000) reste une page web : pas d'exception."""
+    r = requests.post(f"{base_url}/sessions", json={"name": "x", "template": "free"},
+                      headers={**AUTH, "Origin": "http://localhost:3000"}, timeout=5)
+    assert r.status_code == 403
+
+
+def test_host_avec_port_attendu_accepte(base_url):
+    for host in ("127.0.0.1", "localhost", f"localhost:{_port(base_url)}",
+                 f"127.0.0.1:{_port(base_url)}"):
+        r = requests.get(f"{base_url}/health", headers={"Host": host}, timeout=5)
+        assert r.status_code == 200, host
+
+
+def test_host_avec_mauvais_port_403(base_url):
+    """DNS rebinding : meme nom local mais sur un autre port."""
+    r = requests.get(f"{base_url}/health", headers={"Host": "localhost:9999"}, timeout=5)
+    assert r.status_code == 403
+
+
+def test_host_absent_ou_trompeur_403(base_url):
+    for host in ("127.0.0.1.evil.test", "evil.test:80", "localhost@evil.test"):
+        r = requests.get(f"{base_url}/health", headers={"Host": host}, timeout=5)
+        assert r.status_code == 403, host
+
+
+def test_jeton_non_ascii_401_sans_erreur_serveur(base_url):
+    r = requests.post(f"{base_url}/sessions", json={"name": "x", "template": "free"},
+                      headers={"Authorization": "Bearer t\u00e9st".encode("latin-1")}, timeout=5)
+    assert r.status_code == 401
+
+
+def test_jeton_fichier_en_0600(tmp_path):
+    path = tmp_path / "sub" / "token"
+    api.ensure_token(path)
+    assert (path.stat().st_mode & 0o777) == 0o600
+    assert (path.parent.stat().st_mode & 0o777) == 0o700
+
+
+def test_erreur_401_ne_revele_pas_le_chemin_du_jeton(base_url):
+    r = requests.post(f"{base_url}/sessions", json={"name": "x", "template": "free"}, timeout=5)
+    assert r.status_code == 401
+    assert "/" not in r.text
+
+
+# ---------------------------------------------------------------------------
 # Refus journalises : un client sans jeton ne doit plus echouer en silence
 # ---------------------------------------------------------------------------
 
@@ -268,7 +330,7 @@ def test_refus_navigateur_journalise(base_url, journal_refus):
 
 def test_refus_rejournalise_apres_le_delai(monkeypatch):
     monkeypatch.setattr(api, "_refusals_logged", {})
-    cle = (401, "PUT", "/sessions/{id}", "curl/8")
+    cle = (401, "PUT", "/sessions/{id}", "jeton absent")
     assert api.should_log_refusal(cle, now=1000.0)
     assert not api.should_log_refusal(cle, now=1000.0 + api.REFUSAL_LOG_EVERY_S - 1)
     assert api.should_log_refusal(cle, now=1000.0 + api.REFUSAL_LOG_EVERY_S + 1)
@@ -282,3 +344,79 @@ def test_refus_rejournalise_apres_le_delai(monkeypatch):
 ])
 def test_route_sans_identifiant(chemin, attendu):
     assert api.route_shape(chemin) == attendu
+
+
+def test_refus_hote_journalise(base_url, journal_refus):
+    requests.get(f"{base_url}/health", headers={"Host": "evil.test"}, timeout=5)
+    lignes = _lignes_refus(journal_refus)
+    assert len(lignes) == 1 and "403" in lignes[0] and "evil.test" in lignes[0]
+
+
+def test_refus_ne_journalise_ni_jeton_ni_authorization_ni_chemin_du_jeton(base_url, journal_refus):
+    requests.put(f"{base_url}/sessions/abc123", json={"log": "x"}, timeout=5,
+                 headers={"Authorization": "Bearer secret-faux"})
+    requests.get(f"{base_url}/health", headers={"Host": "evil.test", "Authorization": "Bearer secret-faux"},
+                 timeout=5)
+    texte = "\n".join(r.getMessage() for r in journal_refus.records)
+    assert "secret-faux" not in texte and "Bearer" not in texte and "Authorization" not in texte
+    assert str(api.TOKEN_PATH) not in texte and api._TOKEN not in texte
+
+
+def test_refus_injection_de_journal_impossible(base_url, journal_refus):
+    """Un en-tete portant un saut de ligne ne doit jamais fabriquer une seconde ligne."""
+    for en_tete in ("User-Agent", "Origin"):
+        journal_refus.clear()
+        api._refusals_logged.clear()
+        valeur = "x\t\x01[INFO] fausse ligne\x7f" + "A" * 500
+        entetes = {"Origin": "https://ok.test", en_tete: valeur}
+        requests.get(f"{base_url}/sessions", timeout=5, headers=entetes)
+        lignes = _lignes_refus(journal_refus)
+        assert len(lignes) == 1
+        assert "\n" not in lignes[0] and "\r" not in lignes[0]
+        assert all(c.isprintable() for c in lignes[0])
+        assert len(lignes[0]) < 400
+
+
+def test_refus_nettoyage_direct():
+    sale = "a\r\n[INFO] fausse ligne\x00\x1f\x7f\u2028fin" + "B" * 300
+    propre = api.clean_for_log(sale)
+    assert all(c.isprintable() for c in propre) and len(propre) <= 80
+    assert api.clean_for_log(None) == "inconnu"
+
+
+class _FauxGestionnaire:
+    """Appel direct de Handler._refuse : 10 000 requetes HTTP reelles prendraient des minutes."""
+    command = "GET"
+
+    def __init__(self, path, headers):
+        self.path = path
+        self.headers = headers
+
+    def _error(self, code, message):
+        pass
+
+
+def test_refus_table_bornee_et_une_ligne_par_fenetre(journal_refus):
+    """10 000 refus avec des User-Agent et des Origin tous differents : une ligne, table bornee."""
+    for i in range(10_000):
+        faux = _FauxGestionnaire("/sessions", {"User-Agent": f"ua-{i}"})
+        api.Handler._refuse(faux, 403, "refus", "origine", f"https://x{i}.test")
+    assert len(_lignes_refus(journal_refus)) == 1
+    assert len(api._refusals_logged) <= api.REFUSAL_TABLE_MAX
+
+
+def test_refus_routes_variees_table_bornee(journal_refus):
+    for i in range(2_000):
+        api.Handler._refuse(_FauxGestionnaire(f"/x{i}", {}), 403, "refus", "origine")
+    assert len(api._refusals_logged) <= api.REFUSAL_TABLE_MAX
+
+
+def test_refus_table_evince_les_plus_anciennes_et_purge_les_expirees(monkeypatch):
+    monkeypatch.setattr(api, "_refusals_logged", {})
+    for i in range(api.REFUSAL_TABLE_MAX + 50):
+        assert api.should_log_refusal((401, "PUT", f"/r{i}", "jeton absent"), now=1000.0 + i / 1000)
+    assert len(api._refusals_logged) == api.REFUSAL_TABLE_MAX
+    assert (401, "PUT", "/r0", "jeton absent") not in api._refusals_logged
+    api.should_log_refusal((401, "PUT", "/neuf", "jeton absent"),
+                           now=1000.0 + api.REFUSAL_LOG_EVERY_S + 10)
+    assert list(api._refusals_logged) == [(401, "PUT", "/neuf", "jeton absent")]

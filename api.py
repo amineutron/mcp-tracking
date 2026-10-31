@@ -42,6 +42,7 @@ from templates import TEMPLATES, validate_template
 API_HOST = "127.0.0.1"
 API_PORT = 8765
 WRITE_METHODS = ("POST", "PUT", "DELETE")
+LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
 # Jeton lu par les clients locaux (poller, dv_convert, Lyra, tracking.sh...) :
 # lisible par le seul utilisateur du service, donc inaccessible a une page web.
 # Ordre de recherche, du plus explicite au plus general :
@@ -66,12 +67,23 @@ log = logging.getLogger("tracking-api")
 MAX_BODY_BYTES = 2 * 1024 * 1024
 
 # Refus journalises (401/403) : sans cela un client qui n'envoie pas le jeton echoue en
-# silence, ses try/except avalant la reponse. Une ligne par client et par route toutes les
+# silence, ses try/except avalant la reponse. Une ligne par raison et par route toutes les
 # REFUSAL_LOG_EVERY_S secondes au plus, pour qu'un client qui reessaie en boucle n'inonde
-# pas le journal. Le jeton envoye n'est jamais ecrit.
+# pas le journal. La table de dedoublonnage est bornee (REFUSAL_TABLE_MAX) car la route vient
+# du client. Les valeurs fournies par le client sont nettoyees avant d'etre ecrites ; le
+# jeton, l'en-tete Authorization et le chemin du fichier jeton ne le sont jamais.
 REFUSAL_LOG_EVERY_S = 600
+REFUSAL_TABLE_MAX = 256
+LOG_VALUE_MAX = 80
 _refusals_logged: Dict[tuple, float] = {}
 _refusals_lock = threading.Lock()
+
+
+def clean_for_log(value: Optional[str], limit: int = LOG_VALUE_MAX) -> str:
+    """Valeur cliente sure pour le journal : sans caractere de controle ni saut de ligne, tronquee."""
+    if not value:
+        return "inconnu"
+    return "".join(c for c in value if c.isprintable())[:limit] or "inconnu"
 
 
 def route_shape(path: str) -> str:
@@ -88,8 +100,15 @@ def should_log_refusal(key: tuple, now: Optional[float] = None) -> bool:
         last = _refusals_logged.get(key)
         if last is not None and now - last < REFUSAL_LOG_EVERY_S:
             return False
+        for old in [k for k, t in _refusals_logged.items() if now - t >= REFUSAL_LOG_EVERY_S]:
+            del _refusals_logged[old]
+        _refusals_logged.pop(key, None)  # reinsere en fin : l'ordre suit la date
+        while len(_refusals_logged) >= REFUSAL_TABLE_MAX:
+            del _refusals_logged[next(iter(_refusals_logged))]
         _refusals_logged[key] = now
         return True
+
+
 SSE_POLL_S = 0.5
 SSE_HEARTBEAT_S = 15.0
 PURGE_INTERVAL_S = 3600
@@ -216,12 +235,17 @@ class Handler(BaseHTTPRequestHandler):
     def _error(self, code: int, message: str) -> None:
         self._respond(code, {"ok": False, "error": message})
 
-    def _refuse(self, code: int, message: str, reason: str) -> None:
-        """Refuse la requete et le note dans le journal (au plus une ligne par client et route)."""
-        agent = (self.headers.get("User-Agent") or "inconnu")[:80]
-        route = route_shape(self.path)
-        if should_log_refusal((code, self.command, route, agent)):
-            log.warning("refus %s %s %s (%s) client=%s", code, self.command, route, reason, agent)
+    def _refuse(self, code: int, message: str, reason: str, detail: Optional[str] = None) -> None:
+        """Refuse la requete et la note dans le journal (au plus une ligne par raison et route).
+
+        `reason` est un libelle fixe (sert de cle) ; `detail` vient du client : nettoye puis
+        ecrit via repr().
+        """
+        route = clean_for_log(route_shape(self.path))
+        if should_log_refusal((code, self.command, route, reason)):
+            agent = clean_for_log(self.headers.get("User-Agent"))
+            extra = f" {clean_for_log(detail)!r}" if detail is not None else ""
+            log.warning("refus %s %s %s (%s%s) client=%r", code, self.command, route, reason, extra, agent)
         self._error(code, message)
 
     def _body(self) -> Optional[dict]:
@@ -256,23 +280,45 @@ class Handler(BaseHTTPRequestHandler):
         """
         origin = self.headers.get("Origin")
         if origin:
-            self._refuse(403, "requete issue d'un navigateur refusee", f"origine {origin}")
+            self._refuse(403, "requete issue d'un navigateur refusee", "origine", origin)
             return False
-        host = (self.headers.get("Host") or "").split(":")[0]
-        if host and host not in ("127.0.0.1", "localhost", "::1", "[::1]"):
-            self._refuse(403, f"hote non local refuse : {host}", f"hote {host}")
+        if not self._host_allowed():
+            self._refuse(403, "hote refuse", "hote", self.headers.get("Host"))
             return False
         if self.command in WRITE_METHODS:
-            sent = (self.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
-            if not _TOKEN or not hmac.compare_digest(sent, _TOKEN):
-                self._refuse(401, f"jeton requis : lire {TOKEN_PATH}",
-                             "jeton absent" if not sent else "jeton invalide")
+            if not self._token_valid():
+                sent = self.headers.get("Authorization")
+                self._refuse(401, "jeton requis", "jeton absent" if not sent else "jeton invalide")
                 return False
             ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip()
             if ctype and ctype != "application/json":
                 self._error(415, "Content-Type application/json attendu")
                 return False
         return True
+
+    def _host_allowed(self) -> bool:
+        """Host = nom de boucle locale, avec le port d'ecoute s'il est precise (anti DNS rebinding)."""
+        raw = (self.headers.get("Host") or "").strip().lower()
+        if raw.startswith("["):  # IPv6 : [::1] ou [::1]:port
+            name, _, rest = raw[1:].partition("]")
+            port = rest[1:] if rest.startswith(":") else ""
+            if rest and not rest.startswith(":"):
+                return False
+        else:
+            name, _, port = raw.partition(":")
+        if name not in LOCAL_HOSTS:
+            return False
+        return not port or port == str(self.server.server_address[1])
+
+    def _token_valid(self) -> bool:
+        """Comparaison en temps constant ; un en-tete non ASCII est simplement invalide."""
+        sent = (self.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
+        if not _TOKEN:
+            return False
+        try:
+            return hmac.compare_digest(sent.encode("utf-8"), _TOKEN.encode("utf-8"))
+        except (TypeError, ValueError):
+            return False
 
     def _route(self) -> tuple:
         """Retourne (segments, query) : /sessions/abc/stop -> ["sessions","abc","stop"]."""

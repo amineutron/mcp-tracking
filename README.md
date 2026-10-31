@@ -642,22 +642,25 @@ Deux attaquants realistes sur une machine de bureau :
 - `api.py` ecoute uniquement sur `127.0.0.1:8765` -- inaccessible depuis le reseau
 - **Jeton local obligatoire en ecriture** : genere au premier demarrage dans
   `$XDG_RUNTIME_DIR/tracking/token` (droits 0600, donc illisible par un autre utilisateur), exige
-  en `Authorization: Bearer ...` sur POST, PUT et DELETE. Une page web ne peut pas le lire.
-  Lance par le service systemd, le fichier est `/run/tracking/token` (son `RuntimeDirectory`).
-  Un client le cherche dans cet ordre : `TRACKING_TOKEN_FILE`, `/run/tracking/token`, puis
-  `$XDG_RUNTIME_DIR/tracking/token`.
+  en `Authorization: Bearer ...` sur POST, PUT et DELETE. Une page web ne peut pas le lire. Recuperation par les clients : voir [docs/api-token.md](docs/api-token.md).
 - **Refus journalises** : chaque 401 ou 403 laisse une ligne `refus <code> <methode> <route>
   (<raison>) client=<User-Agent>` dans le journal du service (`journalctl -u tracking-api`), au
-  plus une toutes les 10 minutes par client et par route ; le jeton envoye n'y figure jamais.
+  plus une toutes les 10 minutes par raison et par route (table bornee a 256 entrees) ; les
+  valeurs fournies par le client sont nettoyees (caracteres de controle retires, 80 caracteres
+  au plus, ecrites entre guillemets) et le jeton envoye n'y figure jamais.
   Un client qui oublie le jeton et avale l'erreur se voit donc la.
 - **Requetes de navigateur refusees** : tout en-tete `Origin` donne un 403, meme avec le jeton.
-- **En-tete `Host` verifie** (boucle locale uniquement) et `Content-Type: application/json` exige
+- **En-tete `Host` verifie** (boucle locale uniquement, port d'ecoute verifie s'il est precise) et `Content-Type: application/json` exige
   en ecriture.
 - **Signaux limites aux processus enregistres par le serveur** : a la creation d'une session, le
   serveur verifie que le `pid` annonce existe et appartient au meme utilisateur, puis releve son
   heure de demarrage. `/stop` et `/kill` refusent d'agir si cette empreinte a change (numero de
   processus recycle par un autre programme) ou si le pid n'a jamais ete enregistre. Le `pid` ne
   peut plus etre modifie par un `PUT`. Chaque signal envoye est journalise.
+- **Versions verifiables** : `uv.lock` controle en CI, et chaque release GitHub joint `sbom.json`
+  (inventaire CycloneDX des dependances aux versions du lock) ; wheel et sdist portent une
+  attestation de provenance et une attestation SBOM signees par Sigstore
+  (`gh attestation verify <fichier> --owner amineutron`).
 - **Services systemd durcis** : `ProtectSystem=strict`, `ProtectHome=read-only` avec le seul etat
   en ecriture, `PrivateTmp`, `SystemCallFilter=@system-service`, `CapabilityBoundingSet=` vide,
   `UMask=0077`. Verifiable avec `systemd-analyze security tracking-api.service`.
