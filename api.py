@@ -42,6 +42,7 @@ from templates import TEMPLATES, validate_template
 API_HOST = "127.0.0.1"
 API_PORT = 8765
 WRITE_METHODS = ("POST", "PUT", "DELETE")
+LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
 # Jeton lu par les clients locaux (poller, dv_convert, Lyra, tracking.sh...) :
 # lisible par le seul utilisateur du service, donc inaccessible a une page web.
 # Ordre de recherche, du plus explicite au plus general :
@@ -223,20 +224,42 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("Origin"):
             self._error(403, "requete issue d'un navigateur refusee")
             return False
-        host = (self.headers.get("Host") or "").split(":")[0]
-        if host and host not in ("127.0.0.1", "localhost", "::1", "[::1]"):
-            self._error(403, f"hote non local refuse : {host}")
+        if not self._host_allowed():
+            self._error(403, "hote refuse")
             return False
         if self.command in WRITE_METHODS:
-            sent = (self.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
-            if not _TOKEN or not hmac.compare_digest(sent, _TOKEN):
-                self._error(401, f"jeton requis : lire {TOKEN_PATH}")
+            if not self._token_valid():
+                self._error(401, "jeton requis")
                 return False
             ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip()
             if ctype and ctype != "application/json":
                 self._error(415, "Content-Type application/json attendu")
                 return False
         return True
+
+    def _host_allowed(self) -> bool:
+        """Host = nom de boucle locale, avec le port d'ecoute s'il est precise (anti DNS rebinding)."""
+        raw = (self.headers.get("Host") or "").strip().lower()
+        if raw.startswith("["):  # IPv6 : [::1] ou [::1]:port
+            name, _, rest = raw[1:].partition("]")
+            port = rest[1:] if rest.startswith(":") else ""
+            if rest and not rest.startswith(":"):
+                return False
+        else:
+            name, _, port = raw.partition(":")
+        if name not in LOCAL_HOSTS:
+            return False
+        return not port or port == str(self.server.server_address[1])
+
+    def _token_valid(self) -> bool:
+        """Comparaison en temps constant ; un en-tete non ASCII est simplement invalide."""
+        sent = (self.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
+        if not _TOKEN:
+            return False
+        try:
+            return hmac.compare_digest(sent.encode("utf-8"), _TOKEN.encode("utf-8"))
+        except (TypeError, ValueError):
+            return False
 
     def _route(self) -> tuple:
         """Retourne (segments, query) : /sessions/abc/stop -> ["sessions","abc","stop"]."""

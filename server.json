@@ -8,13 +8,13 @@
     "source": "github"
   },
   "websiteUrl": "https://github.com/amineutron/mcp-tracking#readme",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "mcp-tracking",
       "runtimeHint": "uvx",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "transport": {
         "type": "stdio"
       },

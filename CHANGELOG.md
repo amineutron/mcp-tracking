@@ -2,6 +2,15 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), versions [SemVer](https://semver.org/lang/fr/).
 
+## [0.3.0] - 2026-10-31
+
+### Modifié
+- API : l'en-tête `Host` doit aussi porter le port d'écoute (protection DNS rebinding) ; les 401/403 ne révèlent plus le chemin du jeton ; un en-tête `Authorization` non ASCII donne un 401 au lieu d'une erreur serveur.
+
+### Ajouté
+- `docs/api-token.md` : règles de l'API et récupération du jeton par les clients.
+- Tests d'intégration : Origin sur PUT/DELETE, Host/port, jeton non ASCII, droits 0600/0700.
+
 ## [0.2.1] - 2026-09-24
 
 ### Ajouté
