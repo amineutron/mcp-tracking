@@ -2,6 +2,17 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), versions [SemVer](https://semver.org/lang/fr/).
 
+## [0.3.1] - 2026-11-04
+
+### Corrigé
+- API : les requêtes refusées (401/403) sont journalisées, avec une table bornée, pour qu'un client sans jeton soit visible sans fuite d'information.
+
+### Sécurité
+- `certifi` 2026.10.23 (alerte critique : racines emSign à clés intermédiaires compromises).
+
+### Modifié
+- Release : dépendances verrouillées (`uv.lock`), SBOM et provenance signée jointes au wheel.
+
 ## [0.3.0] - 2026-10-31
 
 ### Modifié
